@@ -249,10 +249,12 @@ status p = do
       engine <- Docker.status
       c <- Engine.container p
       cur <- currentBranch p
+      color <- liftEffect Native.colorOutput
       let row k v = say ("  " <> k <> "  " <> v)
+      let running = if color then Native.ansi "38;2;0;255;195" "RUNNING" else "RUNNING"
       say p.tool
-      row "status" (if maybe false (_.state >>> eq "running") c then "RUNNING" else "STOPPED")
-      row "engine" (Docker.machineName <> if engine.running then " RUNNING" else " STOPPED")
+      row "status" (if maybe false (_.state >>> eq "running") c then running else "STOPPED")
+      row "engine" (Docker.machineName <> " " <> if engine.running then running else "STOPPED")
       row "image" (p.image saved.version)
       row "branch" cur
       row "url" (p.url saved.version (creds saved) saved.port)

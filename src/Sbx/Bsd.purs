@@ -271,7 +271,9 @@ status :: Profile -> Aff Int
 status p = do
   st <- requireState p
   m <- findMachine p
-  say (p.tool <> " " <> st.os <> " " <> st.version <> " " <> if maybe false _.running m then "RUNNING" else "STOPPED")
+  color <- liftEffect Native.colorOutput
+  let running = if color then Native.ansi "38;2;0;255;195" "RUNNING" else "RUNNING"
+  say (p.tool <> " " <> st.os <> " " <> st.version <> " " <> if maybe false _.running m then running else "STOPPED")
   say ("  branch " <> st.branch)
   say ("  " <> "file " <> databaseFile st.db <> " in the BSD guest (no server)")
   pure 0
