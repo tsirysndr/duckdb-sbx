@@ -10,14 +10,19 @@ fluentci run test unit                       # any supported development host
 fluentci run test e2e                        # installed bsdkrun, Docker and built dist/duckdb-sbx
 ```
 
-`all` installs the pinned official bsdkrun release (default `v0.12.0`) and its
-bundled Linux libkrun libraries plus gvproxy, enables access to `/dev/kvm`,
-and starts the shared Docker engine with a sparse 20 GiB ext4 data disk.
-It verifies the image store is ext4: BuildKit snapshots on the default
-virtio-fs store can fail with a read-only `/etc/hosts` mount on Linux. It then
-runs unit/mocked CLI tests, builds the native executable and runs the live
-Quack/ZFS tests. Missing virtualization or networking tools fail the job;
-there is no skip-success fallback.
+`all` invokes the project's compiled PureScript CI runner (`src/Ci`). It
+verifies the pinned bsdkrun release archive (default `v0.12.0`), installs its
+bundled Linux libkrun libraries and gvproxy, and enables `/dev/kvm`. It requests
+a sparse 20 GiB Docker data disk, configures the VFS driver and disables the
+containerd snapshotter before testing. VFS avoids the unsupported writable
+overlay path over virtio-fs on Linux/KVM. The active driver is verified after
+restart; E2E diagnostics capture post-ZFS mounts and engine status.
+
+It runs PureScript assertions and `bun test` for mocked CLI/CI checks, builds
+the executable, then runs the opt-in Bun live suite. No Bash scripts are used.
+The project's Node FFI only supplies process/filesystem/network primitives;
+installation decisions, validations, assertions and cleanup are PureScript.
+Missing virtualization/networking tools fail the job; tests are never skipped.
 
 Use `--directory /path/to/duckdb-sbx` to select another checkout, or
 `--bsdkrun-version vX.Y.Z` on `all` to deliberately change the runtime release.

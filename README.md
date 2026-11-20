@@ -257,30 +257,42 @@ on **ubuntu-latest**. It uses `fluentci-io/setup-fluentci@next` with FluentCI
 1.0.5, Node 24.22.2 and Bun 1.4.3, then `npm ci` builds the project. Setup's typed
 environment output is validated before exporting it to later GitHub steps.
 
-The custom native Wasm test component lives in `.fluentci/test`. It installs
-official bsdkrun v0.12.0 (including bundled Linux libkrun libraries and gvproxy),
-enables runner access to `/dev/kvm`, creates the Docker engine with a sparse
-20 GiB ext4 image-store disk, runs the unit/mocked tests, builds the
-executable and runs real VM/Quack/ZFS E2E tests. Missing KVM fails CI instead of
-skipping the live tests. The dedicated disk keeps BuildKit snapshots off
-virtio-fs, where Linux builds can fail mounting `/etc/hosts` on a read-only
-filesystem. Setup verifies the image store is ext4 before testing. Passwords
-and state files are excluded from uploaded diagnostics; test logs are retained for seven days even on failure.
+The custom native Wasm test component lives in `.fluentci/test`. It invokes
+PureScript CI commands in `src/Ci`: downloads and verifies official bsdkrun
+v0.12.0 archives (including Linux libkrun libraries), installs gvproxy, enables
+`/dev/kvm`, and prepares the shared Docker engine. CI requests a sparse 20 GiB
+data disk and explicitly selects Docker's VFS driver with the containerd
+snapshotter disabled. This avoids overlayfs over virtio-fs on Linux/KVM. Setup
+checks the active driver after restarting; E2E diagnostics record actual mounts
+and engine status after ZFS operations. Missing KVM fails rather than skipping.
+
+`npm test` runs PureScript assertions and **Bun tests** for mocked CLI lifecycles,
+CI environment validation, release guards and executable headers. Live tests are
+opt-in and also run under `bun test`:
 
 ```sh
-fluentci run test unit                  # unit/mocked tests through the component
-fluentci run --workflow test            # full Ubuntu CI flow; requires sudo and KVM
+fluentci run test unit                  # PureScript assertions and Bun tests
+fluentci run --workflow test            # full Ubuntu CI; requires sudo and KVM
 npm run build:bin
-npm run test:e2e                        # live tests using an already-installed bsdkrun
+npm run test:e2e                        # Bun live suite; installed bsdkrun required
 ```
 
-The opt-in E2E runner uses a unique sandbox name, tests authenticated host SQL,
-incorrect passwords, port collisions, ZFS branch isolation, quoted password
-rotation, port changes and stop/start persistence, then removes its own
-container, volume and temporary configuration. It preserves an existing engine;
-an engine it started is stopped only if no other containers are running.
-The module's SDK is regenerated from the pinned FluentCI CLI; generated SDK
-copies and Wasm artifacts are not committed. See [.fluentci/test](.fluentci/test/README.md).
+The PureScript E2E runner uses a unique sandbox name, tests authenticated host
+SQL, incorrect passwords, port collisions, ZFS branch isolation, quoted password
+rotation, port changes and stop/start persistence. Aff finalizers remove its own
+container, volume and temporary configuration, including on interruption. It
+preserves an existing engine and stops one it started only when no other
+containers are running. Logs and a machine-readable result are retained for
+seven days even on failure; passwords and state files are excluded.
+
+Installation, E2E assertions/cleanup, release packaging/publishing and GitHub
+environment validation live in `src/Ci/*.purs`. There are no Bash CI scripts.
+`Ci.Native` contains the Node FFI for processes, files, ports and signals; the
+small `bin/bootstrap-ci.mjs` applies setup's environment to `npm ci` before the
+first PureScript build. The compiled PureScript code then validates and exports
+that environment to GitHub. FluentCI's SDK bootstrap/componentization stays in
+the SDK's Node build entrypoints. Generated SDK and Wasm files are ignored.
+See [.fluentci/test](.fluentci/test/README.md).
 
 Push a tag matching `package.json` and `Main.version` (for example `v0.1.0`) to
 run `Release`, or dispatch it manually with an existing matching tag. The release
