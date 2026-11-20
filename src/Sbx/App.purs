@@ -256,7 +256,7 @@ status p = do
       row "status" (if maybe false (_.state >>> eq "running") c then running else "STOPPED")
       row "engine" (Docker.machineName <> " " <> if engine.running then running else "STOPPED")
       row "image" (p.image saved.version)
-      row "branch" cur
+      row "branch" (if color then Native.ansi "38;2;0;255;195" cur else cur)
       row "url" (p.url saved.version (creds saved) saved.port)
       when (maybe false (_.state >>> eq "running") c) do
         ok <- probeIn p (p.ready Linux saved.version (creds saved))
@@ -306,7 +306,10 @@ branch' p o = case o.name, o.delete of
       origin b = maybe "" (\from -> "  (from " <> from <> ")") (toMaybe b.origin)
       known = map (\b -> b.name /\ origin b) vol.branches
       rows = if Array.any (fst' >>> eq "main") known then known else [ "main" /\ "  (initialised on first start)" ] <> known
-    for_ rows \(name /\ note) -> say ((if name == cur then "* " else "  ") <> name <> note)
+    color <- liftEffect Native.colorOutput
+    for_ rows \(name /\ note) -> do
+      let label = (if name == cur then "* " else "  ") <> name
+      say ((if color && name == cur then Native.ansi "38;2;0;255;195" label else label) <> note)
     pure 0
   Just name, true -> do
     vol <- requireVolume p

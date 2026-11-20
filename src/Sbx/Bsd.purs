@@ -274,7 +274,7 @@ status p = do
   color <- liftEffect Native.colorOutput
   let running = if color then Native.ansi "38;2;0;255;195" "RUNNING" else "RUNNING"
   say (p.tool <> " " <> st.os <> " " <> st.version <> " " <> if maybe false _.running m then running else "STOPPED")
-  say ("  branch " <> st.branch)
+  say ("  branch " <> if color then Native.ansi "38;2;0;255;195" st.branch else st.branch)
   say ("  " <> "file " <> databaseFile st.db <> " in the BSD guest (no server)")
   pure 0
 
@@ -306,7 +306,10 @@ branch' p o = case o.name, o.delete of
       origin b = maybe "" (\from -> "  (from " <> from <> ")") (toMaybe b.origin)
       known = map (\b -> b.name /\ origin b) vol.branches
       rows = if Array.any (fst' >>> eq "main") known then known else [ "main" /\ "  (initialised on first start)" ] <> known
-    for_ rows \(name /\ note) -> say ((if name == cur then "* " else "  ") <> name <> note)
+    color <- liftEffect Native.colorOutput
+    for_ rows \(name /\ note) -> do
+      let label = (if name == cur then "* " else "  ") <> name
+      say ((if color && name == cur then Native.ansi "38;2;0;255;195" label else label) <> note)
     pure 0
   Just name, true -> do
     vol <- requireVolume p
