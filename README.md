@@ -259,10 +259,13 @@ environment output is validated before exporting it to later GitHub steps.
 
 The custom native Wasm test component lives in `.fluentci/test`. It installs
 official bsdkrun v0.12.0 (including bundled Linux libkrun libraries and gvproxy),
-enables runner access to `/dev/kvm`, runs the unit/mocked tests, builds the
+enables runner access to `/dev/kvm`, creates the Docker engine with a sparse
+20 GiB ext4 image-store disk, runs the unit/mocked tests, builds the
 executable and runs real VM/Quack/ZFS E2E tests. Missing KVM fails CI instead of
-skipping the live tests. Passwords and state files are excluded from uploaded
-diagnostics; test logs are retained for seven days even on failure.
+skipping the live tests. The dedicated disk keeps BuildKit snapshots off
+virtio-fs, where Linux builds can fail mounting `/etc/hosts` on a read-only
+filesystem. Setup verifies the image store is ext4 before testing. Passwords
+and state files are excluded from uploaded diagnostics; test logs are retained for seven days even on failure.
 
 ```sh
 fluentci run test unit                  # unit/mocked tests through the component

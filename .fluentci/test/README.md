@@ -12,6 +12,9 @@ fluentci run test e2e                        # installed bsdkrun, Docker and bui
 
 `all` installs the pinned official bsdkrun release (default `v0.12.0`) and its
 bundled Linux libkrun libraries plus gvproxy, enables access to `/dev/kvm`,
+and starts the shared Docker engine with a sparse 20 GiB ext4 data disk.
+It verifies the image store is ext4: BuildKit snapshots on the default
+virtio-fs store can fail with a read-only `/etc/hosts` mount on Linux. It then
 runs unit/mocked CLI tests, builds the native executable and runs the live
 Quack/ZFS tests. Missing virtualization or networking tools fail the job;
 there is no skip-success fallback.
