@@ -81,6 +81,6 @@ publish = do
     hash <- liftEffect (N.sha256 path)
     pure (hash <> "  " <> S.drop (S.length "release-assets/") path <> "\n")) assets
   liftEffect $ N.writeText "release-assets/SHA256SUMS" (S.joinWith "" checksums)
-  existing <- N.command { program: "gh", args: [ "release", "view", tag ], env: mempty, cwd: "", timeout: 30000 }
+  existing <- N.command { program: "gh", args: [ "release", "view", tag ], env: mempty, cwd: "", timeout: 30000, output: const (pure unit) }
   when (existing.code /= 0) $ void $ C.run "gh" [ "release", "create", tag, "--verify-tag", "--generate-notes", "--title", tag ]
   void $ C.run "gh" ([ "release", "upload", tag ] <> assets <> [ "release-assets/SHA256SUMS", "--clobber" ])

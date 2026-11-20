@@ -26,7 +26,7 @@ install version = do
   C.demand "The installer requires Ubuntu x86_64 with KVM" (host.os == "linux" && host.arch == "x64")
   liftEffect (N.exists "/dev/kvm") >>= C.demand "/dev/kvm is required; live tests are never skipped"
   void $ C.run "sudo" [ "-n", "apt-get", "update" ]
-  void $ C.run "sudo" [ "-n", "apt-get", "install", "-y", "--no-install-recommends", "ca-certificates", "curl", "tar", "gzip", "xz-utils", "libgmp10", "libtinfo6" ]
+  void $ C.run "sudo" [ "-n", "apt-get", "install", "-y", "--no-install-recommends", "ca-certificates", "curl", "tar", "gzip", "xz-utils", "util-linux", "libgmp10", "libtinfo6" ]
   void $ C.run "sudo" [ "-n", "chmod", "a+rw", "/dev/kvm" ]
   liftEffect (N.readableWritable "/dev/kvm") >>= C.demand "KVM must be readable and writable"
   void $ C.run "docker" [ "--version" ]

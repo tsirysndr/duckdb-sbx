@@ -11,23 +11,27 @@ export const commandImpl = spec => async(signal => new Promise((resolve, reject)
     cwd: spec.cwd || undefined, env: { ...process.env, ...spec.env },
     stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32',
   });
-  let stdout = '', stderr = '', timedOut = false;
-  child.stdout.on('data', chunk => { stdout += chunk; });
-  child.stderr.on('data', chunk => { stderr += chunk; });
+  let stdout = '', stderr = '', settled = false;
+  child.stdout.on('data', chunk => { stdout += chunk; spec.output(String(chunk))(); });
+  child.stderr.on('data', chunk => { stderr += chunk; spec.output(String(chunk))(); });
   const kill = sig => {
     try { process.platform === 'win32' ? child.kill(sig) : process.kill(-child.pid, sig); }
     catch (error) { if (error.code !== 'ESRCH') reject(error); }
   };
-  const cancel = () => kill('SIGKILL');
+  const finish = (error, result) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer); signal.removeEventListener('abort', cancel);
+    // A detached descendant can keep inherited pipes open after its parent
+    // exits. Timeouts must settle without waiting for the 'close' event.
+    child.stdout.destroy(); child.stderr.destroy();
+    error ? reject(error) : resolve(result);
+  };
+  const cancel = () => { kill('SIGKILL'); finish(Error(`${spec.program} interrupted`)); };
+  const timer = setTimeout(() => { kill('SIGKILL'); finish(Error(`${spec.program} timed out`)); }, spec.timeout);
   signal.addEventListener('abort', cancel, { once: true });
-  const timer = setTimeout(() => { timedOut = true; kill('SIGKILL'); }, spec.timeout);
-  const cleanup = () => { clearTimeout(timer); signal.removeEventListener('abort', cancel); };
-  child.on('error', error => { cleanup(); reject(error); });
-  child.on('close', code => {
-    cleanup();
-    if (timedOut) reject(Error(`${spec.program} timed out`));
-    else resolve({ code: code ?? 1, stdout, stderr });
-  });
+  child.on('error', error => finish(error));
+  child.on('close', code => finish(null, { code: code ?? 1, stdout, stderr }));
 }));
 export const readText = path => () => fs.readFileSync(path, 'utf8');
 export const writeText = path => value => () => fs.writeFileSync(path, value);
@@ -63,3 +67,7 @@ export const onInterrupt = action => () => {
   return () => { process.removeListener('SIGINT', handler); process.removeListener('SIGTERM', handler); };
 };
 export const setArgs = args => () => { process.argv.splice(2, process.argv.length - 2, ...args); };
+
+export const stream = text => () => { process.stderr.write(text); };
+
+export const pid = () => process.pid;

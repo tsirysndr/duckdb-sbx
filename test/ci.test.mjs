@@ -7,6 +7,7 @@ import { decode, persist } from '../output/Ci.Environment/index.js';
 import { targets, verifyBinary, verifyVersion } from '../output/Ci.Release/index.js';
 import { install, verifyDriver } from '../output/Ci.Install/index.js';
 import { redact } from '../output/Ci.E2E/index.js';
+import { command } from '../output/Ci.Native/index.js';
 import { promise } from './support/aff.mjs';
 
 test('PureScript validates the complete setup environment before exporting', async () => {
@@ -78,4 +79,21 @@ test('CI accepts VFS and rejects the incompatible snapshotter before E2E', async
     if (savedDriver === undefined) delete process.env.SBX_TEST_DRIVER; else process.env.SBX_TEST_DRIVER = savedDriver;
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+
+test('process output is streamed as well as captured', async () => {
+  const streamed = [];
+  const result = await promise(command({program:process.execPath,args:['-e','console.log("stdout-progress"); console.error("stderr-progress")'],env:{},cwd:'',timeout:5000,output:chunk=>()=>streamed.push(chunk)}));
+  expect(streamed.join('')).toContain('stdout-progress');
+  expect(streamed.join('')).toContain('stderr-progress');
+  expect(result.stdout).toContain('stdout-progress');
+  expect(result.stderr).toContain('stderr-progress');
+});
+
+test('process timeout settles even when a detached descendant holds output pipes', async () => {
+  const started = Date.now();
+  const source = 'const {spawn}=require("node:child_process"); spawn(process.execPath,["-e","setTimeout(()=>{},1500)"],{detached:true,stdio:"inherit"}).unref();';
+  await expect(promise(command({program:process.execPath,args:['-e',source],env:{},cwd:'',timeout:250,output:()=>()=>{}}))).rejects.toThrow('timed out');
+  expect(Date.now()-started).toBeLessThan(1200);
 });

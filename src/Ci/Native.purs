@@ -8,7 +8,7 @@ import Effect.Aff (Aff)
 import Foreign.Object (Object)
 
 type Result = { code :: Int, stdout :: String, stderr :: String }
-type Command = { program :: String, args :: Array String, env :: Object String, cwd :: String, timeout :: Int }
+type Command = { program :: String, args :: Array String, env :: Object String, cwd :: String, timeout :: Int, output :: String -> Effect Unit }
 foreign import commandImpl :: Command -> Async Result
 command :: Command -> Aff Result
 command = toAff <<< commandImpl
@@ -40,3 +40,8 @@ closePort :: Port -> Aff Unit
 closePort = toAff <<< closePortImpl
 foreign import onInterrupt :: Effect Unit -> Effect (Effect Unit)
 foreign import setArgs :: Array String -> Effect Unit
+
+-- | CI progress goes to stderr so FluentCI stdout capture cannot hide it.
+foreign import stream :: String -> Effect Unit
+
+foreign import pid :: Effect Int

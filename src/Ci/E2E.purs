@@ -11,10 +11,11 @@ import Data.Foldable (any, for_)
 import Data.Maybe (Maybe(..))
 import Data.String as S
 import Data.Tuple.Nested ((/\))
-import Effect.Aff (Aff, attempt, bracket)
+import Effect.Aff (Aff, attempt, bracket, forkAff, killFiber, finally, delay)
+import Data.Time.Duration (Milliseconds(..))
 import Effect.Class (liftEffect)
 import Effect.Console as Console
-import Effect.Exception (message)
+import Effect.Exception (message, error)
 import Effect.Ref as Ref
 import Foreign.Object as O
 import Node.Process (setExitCode)
@@ -39,15 +40,24 @@ redact args = A.mapWithIndex (\i arg -> if A.index args (i - 1) == Just "--passw
 record :: Context -> String -> Aff Unit
 record c text = liftEffect $ N.appendText c.log (text <> "\n")
 pass :: Context -> String -> Aff Unit
-pass c text = liftEffect (Console.log ("PASS: " <> text)) *> record c ("PASS: " <> text)
+pass c text = liftEffect (Console.error ("PASS: " <> text)) *> record c ("PASS: " <> text)
 
 command :: Context -> Options -> String -> Array String -> Aff N.Result
 command c options program args = do
-  unless options.secret $ record c ("$ " <> program <> " " <> S.joinWith " " (redact args))
-  result <- N.command { program, args, env: O.union options.env c.env, timeout: options.timeout, cwd: "" }
-  unless options.secret $ record c (result.stdout <> result.stderr)
+  let label = program <> " " <> S.joinWith " " (redact args)
+  liftEffect (N.stream ("[e2e] $ " <> label <> "\n"))
+  unless options.secret $ record c ("$ " <> label)
+  let output chunk = unless options.secret (N.appendText c.log chunk *> N.stream chunk)
+  heartbeat <- forkAff (waiting label 15)
+  result <- finally (killFiber (error "command completed") heartbeat) $
+    N.command { program, args, env: O.union options.env c.env, timeout: options.timeout, cwd: "", output }
   C.demand (program <> " failed (" <> show result.code <> ")" <> if options.secret then "" else ": " <> result.stderr) (options.allowFailure || result.code == 0)
   pure result
+  where
+  waiting label seconds = do
+    delay (Milliseconds 15000.0)
+    liftEffect $ N.stream ("[e2e] still running (" <> show seconds <> "s): " <> label <> "\n")
+    waiting label (seconds + 15)
 
 cliWith :: Context -> Options -> Array String -> Aff N.Result
 cliWith c options args = command c options c.node ([ "bin/ci.js", "sandbox-cli", c.name ] <> args)
@@ -121,7 +131,7 @@ body c = do
   initial <- ("e2e-" <> _) <$> liftEffect (N.randomHex 24)
   port <- freePort
   liftEffect (Ref.write true c.started)
-  void $ cli c [ "start", "linux", "2.0.0", "--password", initial, "--port", show port, "-d" ]
+  void $ cliWith c (defaultOptions { timeout = 600000 }) [ "start", "linux", "2.0.0", "--password", initial, "--port", show port, "-d" ]
   cli c [ "url" ] >>= assertEqual ("quack:127.0.0.1:" <> show port)
   token <- cliWith c (defaultOptions { secret = true }) [ "token" ]
   C.demand "Configured token was not retained" (S.trim token.stdout == initial)
@@ -175,6 +185,7 @@ cleanup c = do
     void $ command c (defaultOptions { allowFailure = true, timeout = 15000 }) c.runtime [ "docker", "status", "--json" ]
     void $ command c (defaultOptions { allowFailure = true, timeout = 15000 }) c.runtime [ "exec", "bsdkrun-docker", "cat", "/proc/mounts" ]
     void $ command c (defaultOptions { allowFailure = true, timeout = 15000 }) c.runtime [ "exec", "bsdkrun-docker", "stat", "-f", "-c", "%T", "/var/lib/docker" ]
+    void $ command c (defaultOptions { allowFailure = true, timeout = 15000 }) c.runtime [ "exec", "bsdkrun-docker", "cat", "/proc/1/limits" ]
     started <- liftEffect (Ref.read c.started)
     when started do
       void $ cliWith c (defaultOptions { allowFailure = true, timeout = 15000 }) [ "log" ]

@@ -7,14 +7,13 @@ import Data.Argonaut.Core (Json, toObject, toArray, toString, toBoolean)
 import Data.Argonaut.Parser (jsonParser)
 import Data.Array as A
 import Data.Either (Either(..), either)
-import Data.Foldable (traverse_)
 import Data.Maybe (Maybe(..), maybe)
+import Data.Int as Int
 import Data.String as S
 import Data.String.Regex (regex, test)
 import Data.String.Regex.Flags (noFlags)
 import Effect.Aff (Aff)
 import Effect.Class (liftEffect)
-import Effect.Console (log)
 import Effect.Exception (error)
 import Foreign.Object as O
 
@@ -51,8 +50,8 @@ readJson path = liftEffect (N.readText path) >>= fromEither <<< jsonParser
 
 runWith :: O.Object String -> String -> Array String -> Aff N.Result
 runWith env program args = do
-  r <- N.command { program, args, env, cwd: "", timeout: 300000 }
-  liftEffect $ traverse_ log (A.filter (_ /= "") [ r.stdout, r.stderr ])
+  liftEffect $ N.stream ("[ci] $ " <> S.joinWith " " ([ program ] <> args) <> "\n")
+  r <- N.command { program, args, env, cwd: "", timeout: 300000, output: N.stream }
   demand (program <> " failed (" <> show r.code <> ")") (r.code == 0)
   pure r
 
@@ -74,16 +73,33 @@ projectVersion :: Aff String
 projectVersion = readJson "package.json" >>= fromEither <<< stringField "version"
 
 prepareRuntime :: Aff Unit
-prepareRuntime = liftEffect do
-  let path = ".fluentci/tools/bsdkrun/bin/bsdkrun"
-  installed <- N.exists path
-  when installed do
-    binary <- N.resolve path
-    directory <- N.resolve ".fluentci/tools/bsdkrun/bin"
-    old <- N.env "PATH"
-    N.setEnv "BSDKRUN_BIN" binary
-    N.setEnv "PATH" (directory <> ":" <> old)
-  N.setEnv "BSDKRUN_NO_AUTO_INSTALL" "1"
+prepareRuntime = do
+  liftEffect do
+    let path = ".fluentci/tools/bsdkrun/bin/bsdkrun"
+    installed <- N.exists path
+    when installed do
+      binary <- N.resolve path
+      directory <- N.resolve ".fluentci/tools/bsdkrun/bin"
+      old <- N.env "PATH"
+      N.setEnv "BSDKRUN_BIN" binary
+      N.setEnv "PATH" (directory <> ":" <> old)
+    N.setEnv "BSDKRUN_NO_AUTO_INSTALL" "1"
+  host <- liftEffect N.platform
+  ci <- liftEffect (N.env "GITHUB_ACTIONS")
+  when (host.os == "linux" && ci == "true") do
+    -- Linux's virtio-fs backend pins an O_PATH fd for every looked-up inode.
+    -- Raising only the soft limit cannot exceed the runner's inherited hard
+    -- limit. Lift both before launching or restarting the VM, so it inherits
+    -- the kernel ceiling, not a small interactive-shell limit.
+    raw <- liftEffect (N.readText "/proc/sys/fs/nr_open")
+    limit <- cappedLimit raw
+    ownPid <- liftEffect N.pid
+    void $ run "sudo" [ "-n", "prlimit", "--pid", show ownPid, "--nofile=" <> show limit <> ":" <> show limit ]
+    void $ run "prlimit" [ "--pid", show ownPid, "--nofile" ]
+  where
+  cappedLimit raw = fromEither $ case Int.fromString (S.trim raw) of
+    Just value | value >= 65536 -> Right value
+    _ -> Left "Cannot determine a usable Linux open-file ceiling"
 
 bsdkrun :: Aff String
 bsdkrun = fallback "BSDKRUN_BIN" "bsdkrun"
