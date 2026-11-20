@@ -82,7 +82,7 @@ for(const os of ['freebsd','netbsd']) {
     run(['stop']); assert.equal(fake().machine.running,false);
     run(['start','--cpus','4','--mem','2048','-d']);
     assert.equal(fake().machine.cpus,4); assert.equal(state().cpus,4);
-    run(['branch','staging']); run(['stop']);
+    run(['checkout','-b','staging']); run(['stop']);
     run(['checkout','staging']); assert.equal(fake().machine.running,false);
     run(['start','-d']); assert.equal(state().branch,'staging');
     run(['destroy','--yes']); assert.equal(fake().machine,null); assert.equal(fake().volume,false);

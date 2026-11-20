@@ -71,8 +71,11 @@ password :: Context -> Aff String
 password c = C.readJson (c.scratch <> "/config/" <> c.name <> "/state.json") >>= C.fromEither <<< C.stringField "password"
 
 query :: Context -> String -> String -> String -> Boolean -> Aff String
-query c client token sql reject = do
-  uri <- cli c [ "url" ]
+query c client token = queryAt c client token []
+
+queryAt :: Context -> String -> String -> Array String -> String -> Boolean -> Aff String
+queryAt c client token selected sql reject = do
+  uri <- cli c (selected <> [ "url" ])
   C.demand "Invalid sandbox URI" (C.matches "^quack:127\\.0\\.0\\.1:[0-9]+$" uri)
   let attachSql = "ATTACH '" <> uri <> "' AS sandbox (TOKEN getenv('DUCKDB_SBX_E2E_PASSWORD')); CONNECT sandbox;"
   result <- command c (defaultOptions { allowFailure = reject, timeout = 120000, env = O.singleton "DUCKDB_SBX_E2E_PASSWORD" token }) client
@@ -151,13 +154,31 @@ body c = do
     Install.verifyDriver c.runtime
     query c client initial "SELECT n FROM e2e_values;" false >>= assertEqual "42"
     pass c "normal startup creates an overlay/ext4 engine and preserves it across VM restart"
-  void $ cli c [ "checkout", "-b", "feature" ]
-  void $ query c client initial "UPDATE e2e_values SET n=7;" false
+  void $ cli c [ "branch", "feature" ]
+  queryAt c client initial ["--branch", "feature"] "SELECT n FROM e2e_values;" false >>= assertEqual "42"
+  void $ queryAt c client initial ["--branch", "feature"] "UPDATE e2e_values SET n=7;" false
+  queryAt c client initial ["--branch", "feature"] "SELECT n FROM e2e_values;" false >>= assertEqual "7"
+  query c client initial "SELECT n FROM e2e_values;" false >>= assertEqual "42"
+  void $ cli c [ "branch", "nested", "--from", "feature" ]
+  queryAt c client initial ["--branch", "nested"] "SELECT n FROM e2e_values;" false >>= assertEqual "7"
+  void $ cli c [ "checkout", "feature" ]
   query c client initial "SELECT n FROM e2e_values;" false >>= assertEqual "7"
   void $ cli c [ "checkout", "main" ]
   query c client initial "SELECT n FROM e2e_values;" false >>= assertEqual "42"
+  void $ cli c [ "stop" ]
+  queryAt c client initial ["--branch", "feature"] "SELECT n FROM e2e_values;" false >>= assertEqual "7"
+  void $ cli c [ "start", "-d" ]
+  query c client initial "SELECT n FROM e2e_values;" false >>= assertEqual "42"
+  void $ cli c [ "--branch", "feature", "stop" ]
+  queryAt c client initial ["--branch", "nested"] "SELECT n FROM e2e_values;" false >>= assertEqual "7"
+  void $ cli c [ "--branch", "feature", "start", "-d" ]
+  queryAt c client initial ["--branch", "feature"] "SELECT n FROM e2e_values;" false >>= assertEqual "7"
+  void $ cli c [ "branch", "-d", "nested" ]
+  queryAt c client initial ["--branch", "feature"] "SELECT n FROM e2e_values;" false >>= assertEqual "7"
   void $ cli c [ "branch", "-d", "feature" ]
-  pass c "ZFS branch writes are isolated and main retains its data"
+  query c client initial "SELECT n FROM e2e_values;" false >>= assertEqual "42"
+  pass c "parallel containers, nested forks, focus changes, independent stops and ZFS isolation"
+
   collisionPort <- N.reservePort
   liftEffect (Ref.write (Just collisionPort.handle) c.occupied)
   collision <- cliWith c (defaultOptions { allowFailure = true }) [ "start", "--port", show collisionPort.port, "-d" ]
