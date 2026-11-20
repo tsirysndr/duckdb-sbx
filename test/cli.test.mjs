@@ -46,19 +46,20 @@ import { basename, join } from 'node:path';
 import { spawn } from 'node:child_process';
 const dir = process.env.SBX_TEST_DIR;
 const file = join(dir, 'fake.json');
-const s = existsSync(file) ? JSON.parse(readFileSync(file)) : { engine: true, volume: false, branches: [], mounted: null, container: null };
+const s = existsSync(file) ? JSON.parse(readFileSync(file)) : { engine: false, engineCreated: false, volume: false, branches: [], mounted: null, container: null };
 const a = process.argv.slice(2), tool = basename(process.argv[1]);
 if (a[0] === '--log-level') a.splice(0,2);
 appendFileSync(join(dir, 'calls.jsonl'), JSON.stringify({tool, args:a})+'\\n');
 const out = x => console.log(JSON.stringify(x));
-const status = () => ({running:s.engine, machine_id:'engine', machine_running:s.engine, socket:'/fake/docker.sock', mounts:[]});
+const status = () => ({running:s.engine, machine_id:s.engineCreated?'engine':null, machine_running:s.engine, socket:'/fake/docker.sock', mounts:[]});
 const stopForward = () => { if(s.forwardPid) { try {process.kill(s.forwardPid);} catch {} s.forwardPid=null; } };
 const die = () => { console.error('unexpected command: '+tool+' '+a.join(' ')); process.exit(1); };
 if (tool === 'bsdkrun') {
-  if(a[0]==='ps' || (a[0]==='volume' && a[1]==='ls')) out([]);
+  if(a[0]==='--version') console.log(process.env.SBX_BSDKRUN_VERSION || 'bsdkrun 0.12.1');
+  else if(a[0]==='ps' || (a[0]==='volume' && a[1]==='ls')) out([]);
   else if(a[0]==='docker') {
     if(a[1]==='status') out(status());
-    else if(a[1]==='start') { s.engine=true; out(status()); }
+    else if(a[1]==='start') { s.engine=true; s.engineCreated=true; out(status()); }
     else if(a[1]==='stop') s.engine=false;
     else if(a[1]==='ps') out(s.container ? [s.container] : []);
     else die();
@@ -93,6 +94,9 @@ writeFileSync(file, JSON.stringify(s));
       assert.equal(r.status, code, `${args.join(' ')}\n${r.stdout}\n${r.stderr}\n${r.error ?? ''}`);
       return r;
     };
+    const oldRuntime = run(['start', 'linux', '2.0.0', '--port', String(port), '-d'], 1, {SBX_BSDKRUN_VERSION:'bsdkrun 0.12.0'});
+    assert.match(oldRuntime.stderr, /requires bsdkrun >= 0.12.1/);
+    assert.equal(JSON.parse(readFileSync(join(dir, 'fake.json'))).engineCreated, false);
     run(['start', 'linux', '2.0.0', '--db', 'analytics', '--password', 'configured-secret', '--port', String(port), '-d']);
     const statePath = join(env.XDG_CONFIG_HOME, 'duckdb-sbx', 'state.json');
     assert.equal(JSON.parse(readFileSync(statePath)).db, 'analytics');
@@ -126,6 +130,10 @@ writeFileSync(file, JSON.stringify(s));
     assert(calls.some(c => c.tool==='docker' && c.args.includes('duckdb-sbx-client') && c.args.includes('SELECT 42;')));
     assert(calls.some(c => c.tool==='docker' && c.args.includes('SBX_PASSWORD=configured-secret')));
     assert(calls.some(c => c.tool==='bsdkrun' && c.args[0]==='docker' && c.args[1]==='start' && c.args.includes('127.0.0.1')));
+    const engineStarts = calls.filter(c => c.tool==='bsdkrun' && c.args[0]==='docker' && c.args[1]==='start');
+    assert.equal(engineStarts.filter(c => c.args.includes('--disk-size')).length, 1);
+    assert(engineStarts[0].args.includes('20G'));
+    assert(engineStarts.slice(1).every(c => !c.args.includes('--disk-size')));
     run(['start', '--db', '../escape', '-d'], 1);
     run(['start', 'linux', 'bad\nFROM injected', '-d'], 1); run(['start', 'linux', '1.4.5', '-d'], 1);
     run(['start', 'linux', 'custom/duckdb:dev', '--port', String(port), '-d'], 1, {SBX_REPORTED_VERSION:'v1.5.6'});

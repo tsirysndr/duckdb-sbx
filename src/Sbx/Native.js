@@ -7,6 +7,7 @@ import { dirname } from "node:path";
 import { homedir } from "node:os";
 import { join, delimiter } from "node:path";
 import { fileURLToPath } from "node:url";
+import * as SDK from "@bsdkrun/sdk";
 import { async } from "../Bsdkrun.Internal/foreign.js";
 
 export const confirmImpl = question => async(signal => new Promise(resolve => {
@@ -114,3 +115,14 @@ export const reapOrphanGvproxies = port => () => {
 // Colour only on a terminal, and not when NO_COLOR asks for plain output.
 export const colorOutput = () => Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
 export const ansi = code => text => `\x1b[${code}m${text}\x1b[0m`;
+
+// Generic SDK bridge: keeps preflight library paths, binary resolution,
+// cancellation and output forwarding identical to other SDK operations.
+export const runBsdkrunImpl = args => async(async signal => {
+  const result = await SDK.runCli(args, {
+    signal,
+    onStdout: chunk => process.stdout.write(chunk),
+    onStderr: chunk => process.stderr.write(chunk),
+  });
+  return result.exitCode;
+});

@@ -10,7 +10,7 @@ import Effect.Exception (throw)
 import Sbx.DuckDB (profile, databaseFile, versionAllowed)
 import Bsdkrun.Options as Options
 import Sbx.Bsd (createOptions)
-import Sbx.Engine (mountPoint, runArgs)
+import Sbx.Engine (mountPoint, runArgs, runtimeVersionAllowed)
 import Sbx.Profile (ClientCmd(..), Os(..), parseOs)
 
 assert :: String -> Boolean -> Effect Unit
@@ -50,4 +50,7 @@ main = do
   let args = Options.buildCreateArgs (createOptions profile FreeBSD (st { os = "freebsd", version = "15.1" }))
   assert "BSD creation uses release, ZFS branch and root disk, no TCP port"
     (args == [ "freebsd", "-d", "--version", "15.1", "--name", "duckdb-sbx", "--cpus", "2", "--mem", "1024", "--zfs", "duckdb-sbx@feature:/var/lib/duckdb", "--disk-size", "10G" ])
+  assert "new engines require the fixed runtime" (not (runtimeVersionAllowed "bsdkrun 0.12.0") && not (runtimeVersionAllowed "bsdkrun 0.11.99"))
+  assert "fixed and newer runtimes are accepted" (runtimeVersionAllowed "bsdkrun 0.12.1\n" && runtimeVersionAllowed "bsdkrun 0.13.0" && runtimeVersionAllowed "bsdkrun 1.0.0")
+  assert "unrecognized runtime versions fail clearly" (not (runtimeVersionAllowed "unknown"))
   log "duckdb-sbx tests passed"

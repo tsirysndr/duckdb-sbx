@@ -81,3 +81,9 @@ foreign import reapOrphanGvproxies :: Int -> Effect (Array Int)
 foreign import colorOutput :: Effect Boolean
 -- | Wrap text in an SGR code (`"36"` is teal).
 foreign import ansi :: String -> String -> String
+
+-- | Run literal bsdkrun arguments through the SDK with streamed output.
+runBsdkrun :: Array String -> Aff Int
+runBsdkrun = toAff <<< runBsdkrunImpl
+
+foreign import runBsdkrunImpl :: Array String -> Async Int
