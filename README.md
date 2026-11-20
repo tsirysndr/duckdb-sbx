@@ -176,6 +176,24 @@ the Linux container normally has none. Use `log --boot` for VM startup issues.
 NetBSD may reboot once to grow its root disk and once to load ZFS modules;
 startup handles both. Provisioning errors include the package manager output.
 
+## Live validation
+
+On 2026-11-20, using macOS/arm64 and bsdkrun 0.12.0:
+
+| Guest | Live result |
+| --- | --- |
+| FreeBSD 14.3 | Booted, mounted ZFS, installed official DuckDB 1.5.6, and returned 42 from a SQL query |
+| NetBSD 11.99.11 (current) | Booted, resized the root disk, loaded ZFS after reboot, mounted the branch, and queried official DuckDB 1.5.5's version |
+| NetBSD 10.1 | bsdkrun's kernel download URL returned HTTP 404 before boot |
+
+Both installed packages were correctly rejected by the DuckDB >= 2 startup
+check, so an end-to-end BSD sandbox with DuckDB >= 2 remains unverified.
+NetBSD current also triggered Hypervisor.framework panics during shutdown;
+bsdkrun eventually stopped the VM through its timeout fallback. The live run
+exposed and fixed delayed detection of staged NetBSD ZFS modules when the
+initial boot hook does not write a host readiness marker. All temporary test
+VMs and data volumes were removed; the existing Docker engine was preserved.
+
 ## Development
 
 ```sh
