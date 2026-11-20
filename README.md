@@ -260,14 +260,19 @@ environment output is validated before exporting it to later GitHub steps.
 The custom native Wasm test component lives in `.fluentci/test`. It invokes
 PureScript CI commands in `src/Ci`: downloads and verifies official bsdkrun
 v0.12.0 archives (including Linux libkrun libraries), installs gvproxy, enables
-`/dev/kvm`, and prepares the shared Docker engine. CI requests a sparse 20 GiB
-data disk and explicitly selects Docker's VFS driver with the containerd
-snapshotter disabled. This avoids overlayfs over virtio-fs on Linux/KVM. Setup
-checks the active driver after restarting; E2E diagnostics record actual mounts
-and engine status after ZFS operations. Missing KVM fails rather than skipping. On GitHub Linux runners the CI code
-raises both open-file limits to `/proc/sys/fs/nr_open` before launching VMs: the
-Linux virtio-fs backend retains a host descriptor per looked-up inode, so VFS
-image copies can exceed the runner's inherited hard limit.
+`/dev/kvm`, and prepares the shared Docker engine. CI creates a sparse 20 GiB
+image-store disk and formats the regular file as ext4 on the host before its
+first boot. This bypasses a guest-formatting path that can truncate the backing
+file by 64 KiB and leave ext4 with invalid geometry after restart. It checks
+native overlay storage (`overlayfs`/`overlay2`) and the actual ext4 mount both
+before and after an engine restart. VFS and virtio-fs image stores fail these
+checks. Formatting requires a fresh engine and image store; existing disks
+are never reformatted.
+
+Missing KVM fails rather than skipping. On GitHub Linux runners the CI code
+raises both open-file limits to `/proc/sys/fs/nr_open` before launching VMs:
+the Linux virtio-fs backend retains a host descriptor per looked-up inode.
+E2E diagnostics record actual mounts, engine status and guest process limits.
 
 `npm test` runs PureScript assertions and **Bun tests** for mocked CLI lifecycles,
 CI environment validation, release guards and executable headers. Live tests are
