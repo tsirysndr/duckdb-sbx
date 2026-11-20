@@ -16,7 +16,10 @@ bundled Linux libkrun libraries and gvproxy, and enables `/dev/kvm`. It requests
 a sparse 20 GiB Docker data disk, configures the VFS driver and disables the
 containerd snapshotter before testing. VFS avoids the unsupported writable
 overlay path over virtio-fs on Linux/KVM. The active driver is verified after
-restart; E2E diagnostics capture post-ZFS mounts and engine status.
+restart; E2E diagnostics capture post-ZFS mounts, engine status and guest
+process limits. GitHub Linux processes raise both their soft/hard open-file
+limits to the kernel ceiling before starting VMs; this prevents Linux virtio-fs
+inode handles from exhausting an inherited low hard limit.
 
 It runs PureScript assertions and `bun test` for mocked CLI/CI checks, builds
 the executable, then runs the opt-in Bun live suite. No Bash scripts are used.
@@ -40,3 +43,8 @@ its own container and ZFS volume in `finally`, and preserves an already-running
 engine. It stops an engine it started only when no other containers are
 running. Logs and a machine-readable result go to `.fluentci/test-logs/`;
 passwords and state files are excluded from diagnostics.
+
+Command output streams to stderr to remain visible through FluentCI's stdout
+capture. E2E prints redacted command lines and a heartbeat every 15 seconds.
+Cold-image startup has a ten-minute limit; shorter per-command limits and
+pipe-independent timeout handling keep failures bounded.

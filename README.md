@@ -264,7 +264,10 @@ v0.12.0 archives (including Linux libkrun libraries), installs gvproxy, enables
 data disk and explicitly selects Docker's VFS driver with the containerd
 snapshotter disabled. This avoids overlayfs over virtio-fs on Linux/KVM. Setup
 checks the active driver after restarting; E2E diagnostics record actual mounts
-and engine status after ZFS operations. Missing KVM fails rather than skipping.
+and engine status after ZFS operations. Missing KVM fails rather than skipping. On GitHub Linux runners the CI code
+raises both open-file limits to `/proc/sys/fs/nr_open` before launching VMs: the
+Linux virtio-fs backend retains a host descriptor per looked-up inode, so VFS
+image copies can exceed the runner's inherited hard limit.
 
 `npm test` runs PureScript assertions and **Bun tests** for mocked CLI lifecycles,
 CI environment validation, release guards and executable headers. Live tests are
@@ -283,7 +286,11 @@ rotation, port changes and stop/start persistence. Aff finalizers remove its own
 container, volume and temporary configuration, including on interruption. It
 preserves an existing engine and stops one it started only when no other
 containers are running. Logs and a machine-readable result are retained for
-seven days even on failure; passwords and state files are excluded.
+seven days even on failure; passwords and state files are excluded. Commands
+stream their output through stderr so FluentCI does not buffer progress, with
+a heartbeat every 15 seconds during silent waits. Initial cold-image startup
+is bounded to ten minutes; other commands keep their explicit shorter limits.
+Timeouts settle even if a detached descendant retains an output pipe.
 
 Installation, E2E assertions/cleanup, release packaging/publishing and GitHub
 environment validation live in `src/Ci/*.purs`. There are no Bash CI scripts.
