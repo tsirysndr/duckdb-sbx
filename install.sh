@@ -24,6 +24,16 @@ HELP
 [ "$#" -le 1 ] || die 'expected at most one version argument (use --help)'
 case "${1:-}" in -h|--help) usage; exit 0 ;; esac
 
+printf '\033[38;2;0;255;195m'
+cat <<'BANNER'
+       __           __       ____               __
+  ____/ /_  _______/ /______/ / /_        _____/ /_  _  __
+ / __  / / / / ___/ //_/ __  / __ \______/ ___/ __ \| |/_/
+/ /_/ / /_/ / /__/ ,< / /_/ / /_/ /_____(__  ) /_/ />  <
+\__,_/\__,_/\___/_/|_|\__,_/_.___/     /____/_.___/_/|_|
+BANNER
+printf '\033[0m\n'
+
 version=${1:-${DUCKDB_SBX_VERSION:-latest}}
 case "$version" in
   latest) base='https://github.com/tsirysndr/duckdb-sbx/releases/latest/download' ;;
