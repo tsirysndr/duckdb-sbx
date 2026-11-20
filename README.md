@@ -1,4 +1,5 @@
 # duckdb-sbx
+[![Test](https://github.com/tsirysndr/duckdb-sbx/actions/workflows/test.yml/badge.svg)](https://github.com/tsirysndr/duckdb-sbx/actions/workflows/test.yml)
 
 DuckDB in a [bsdkrun](https://github.com/tsirysndr/bsdkrun) microVM, with a
 ZFS database branch you can fork copy-on-write, switch between, and delete.
