@@ -249,6 +249,60 @@ exposed and fixed delayed detection of staged NetBSD ZFS modules when the
 initial boot hook does not write a host readiness marker. All temporary test
 VMs and data volumes were removed; the existing Docker engine was preserved.
 
+## GitHub Actions and releases
+
+The `Test` workflow runs on pushes to `main`, pull requests and manual dispatch,
+on **ubuntu-latest**. It uses `fluentci-io/setup-fluentci@next` with FluentCI
+0.17.8 and `setup-purescript@v0.2.0` to provision PureScript 0.15.16, Spago
+1.0.5, Node 24.22.2 and Bun 1.4.3, then `npm ci` builds the project. Setup's typed
+environment output is validated before exporting it to later GitHub steps.
+
+The custom native Wasm test component lives in `.fluentci/test`. It installs
+official bsdkrun v0.12.0 (including bundled Linux libkrun libraries and gvproxy),
+enables runner access to `/dev/kvm`, runs the unit/mocked tests, builds the
+executable and runs real VM/Quack/ZFS E2E tests. Missing KVM fails CI instead of
+skipping the live tests. Passwords and state files are excluded from uploaded
+diagnostics; test logs are retained for seven days even on failure.
+
+```sh
+fluentci run test unit                  # unit/mocked tests through the component
+fluentci run --workflow test            # full Ubuntu CI flow; requires sudo and KVM
+npm run build:bin
+npm run test:e2e                        # live tests using an already-installed bsdkrun
+```
+
+The opt-in E2E runner uses a unique sandbox name, tests authenticated host SQL,
+incorrect passwords, port collisions, ZFS branch isolation, quoted password
+rotation, port changes and stop/start persistence, then removes its own
+container, volume and temporary configuration. It preserves an existing engine;
+an engine it started is stopped only if no other containers are running.
+The module's SDK is regenerated from the pinned FluentCI CLI; generated SDK
+copies and Wasm artifacts are not committed. See [.fluentci/test](.fluentci/test/README.md).
+
+Push a tag matching `package.json` and `Main.version` (for example `v0.1.0`) to
+run `Release`, or dispatch it manually with an existing matching tag. The release
+workflow first runs the complete test workflow on that tag's source, then uses
+the same PureScript setup and Bun cross-compilation to generate:
+
+| Asset | Target |
+| --- | --- |
+| `duckdb-sbx-darwin-aarch64.tar.gz` | macOS Apple Silicon |
+| `duckdb-sbx-linux-x86_64.tar.gz` | Linux x86_64, baseline CPU target |
+| `duckdb-sbx-linux-arm64.tar.gz` | Linux ARM64 |
+
+Each archive includes the executable, README and MIT license. Builds verify the
+executable's architecture and release version before uploading artifacts. Only
+after all targets succeed does a separate job with `contents: write` create or
+update the GitHub release and upload all three archives plus `SHA256SUMS`.
+GitHub's automatic token is sufficient; no repository secrets are required.
+The binaries still require bsdkrun (and Docker for Linux guests) on the user host.
+
+To build and verify a release archive locally without publishing:
+
+```sh
+RELEASE_TAG=v0.1.0 RELEASE_PLATFORM=linux-x86_64 npm run build:release
+```
+
 ## Development
 
 ```sh
@@ -260,8 +314,8 @@ npm run build:bin
 Tests cover profiles, OS parsing, VM/container creation arguments, version
 guards and lifecycle/branch switching with mocked bsdkrun/Docker commands.
 They include port forwarding/collisions, password generation and rotation,
-package failures, old BSD packages and NetBSD reboots; they do
-not boot real VMs. A live smoke test on a fresh sandbox is:
+package failures, old BSD packages and NetBSD reboots. `npm test` does not boot
+real VMs; the opt-in E2E command and the CI component do. A live smoke test on a fresh sandbox is:
 
 ```sh
 duckdb-sbx start
