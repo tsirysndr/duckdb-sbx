@@ -1,0 +1,36 @@
+package:
+  name: duckdb-sbx
+  dependencies:
+    - aff
+    - arrays
+    - bsdkrun
+    - console
+    - control
+    - datetime
+    - effect
+    - either
+    - exceptions
+    - foldable-traversable
+    - foreign-object
+    - integers
+    - maybe
+    - node-process
+    - nullable
+    - optparse
+    - prelude
+    - strings
+    - transformers
+    - tuples
+  test:
+    main: Test.Main
+    dependencies:
+      - console
+workspace:
+  packageSet:
+    registry: 77.0.0
+  extraPackages:
+    bsdkrun:
+      # The bsdkrun PureScript SDK, pinned to a commit. For local SDK work,
+      # swap in:   path: ../bsdkrun-purescript
+      git: https://github.com/tsirysndr/bsdkrun-purescript.git
+      ref: 12307006922b696126e277f7e96ef27397dc32ae

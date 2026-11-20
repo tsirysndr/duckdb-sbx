@@ -1,0 +1,29 @@
+{
+  "name": "duckdb-sbx",
+  "version": "0.1.0",
+  "description": "DuckDB in a bsdkrun microVM, with ZFS-branched data",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "duckdb-sbx": "bin/duckdb-sbx.js"
+  },
+  "files": [
+    "bin",
+    "output/**/*.js",
+    "output/package.json"
+  ],
+  "scripts": {
+    "build": "spago build",
+    "test": "spago test && npm run test:cli",
+    "prepare": "spago build",
+    "build:bin": "spago build && mkdir -p dist && bun build --compile --minify bin/duckdb-sbx.js --outfile dist/duckdb-sbx",
+    "test:cli": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@bsdkrun/sdk": "^0.8.0"
+  },
+  "devDependencies": {
+    "purescript": "^0.15.16",
+    "spago": "^1.0.5"
+  }
+}
