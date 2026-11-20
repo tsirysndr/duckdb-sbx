@@ -6,7 +6,7 @@ Written in PureScript, following [postgres-sbx](../postgres-sbx),
 [mariadb-sbx](../mariadb-sbx), and [sqlite-sbx](../sqlite-sbx).
 
 ```sh
-duckdb-sbx start                       # Linux, DuckDB 2.0.0
+duckdb-sbx start                       # Linux, DuckDB 2.0.0 Quack server on 127.0.0.1:9494
 duckdb-sbx duckdb                      # interactive SQL shell; .quit to leave
 duckdb-sbx checkout -b experiment      # fork main and switch
 duckdb-sbx duckdb                      # query or change the fork
@@ -37,10 +37,57 @@ version. Update the guest's package repository/package, then rerun `start`.
 The tool does not build DuckDB from source or silently accept an older version.
 Package availability varies with the OS release, architecture and repository.
 
-DuckDB opens a file in the guest. There is no listening server, host port,
-password, or Drizzle integration. `url` reports the file's location **inside
-the guest**; it is not a host connection URL. The interactive CLI includes
-completion and syntax highlighting; `sql` and `cli` also open it.
+On Linux, the server owns the database file and exposes the **Quack remote
+protocol**, authenticated with a password/token. The host listener binds only
+to `127.0.0.1`. BSD guests retain embedded file access and do not accept
+`--port` or `--password`. There is no Drizzle integration.
+
+## Linux server and connections
+
+```sh
+duckdb-sbx start --password 'my-development-password'
+duckdb-sbx start --port 19494 --password 'another-password'  # rotate and/or change port
+duckdb-sbx url                         # quack:127.0.0.1:19494
+duckdb-sbx token                       # print the current password/token
+duckdb-sbx duckdb                      # authenticated SQL shell
+duckdb-sbx duckdb -c 'SELECT version(), 42;'
+duckdb-sbx sql -csv -c 'SELECT 42;'     # aliases also forward CLI arguments
+```
+
+`--password` accepts at least four characters and is the Quack authentication
+token, not a SQL user's password. If omitted on first start, a random 256-bit
+hex token is generated. Subsequent starts reuse it; setting `--password` again
+recreates the server with the new token and preserves the database. The token
+stays the same across branch checkouts. Port changes also recreate the server
+without discarding data. Omitting `--port` reuses the recorded port, initially
+9494. Startup rejects a conflicting port before replacing the existing server.
+Readiness checks both an authenticated SQL query and the host listener. If an
+existing engine publishes beyond loopback, startup removes the server and
+reports how to restart that engine with `--publish-bind 127.0.0.1`.
+
+The password is kept in the local state file with mode `0600`, and supplied to
+the container through its environment. Server/client scripts read it with
+`getenv`, so quotes in a password do not become SQL text. Logs, status and the
+connection URI do not print it; `token` prints it explicitly.
+
+To connect from a **DuckDB 2 or newer CLI on the host**, use the URI from `url`
+and the token from `token`. For the default port:
+
+```sh
+export DUCKDB_SBX_PASSWORD="$(duckdb-sbx token)"
+duckdb :memory: -cmd "ATTACH 'quack:127.0.0.1:9494' AS sbx (TOKEN getenv('DUCKDB_SBX_PASSWORD')); CONNECT sbx;"
+```
+
+`CONNECT sbx` routes subsequent SQL to the server, so ordinary `CREATE TABLE`,
+`INSERT` and `SELECT` operate on the mounted branch. This uses Quack over HTTP
+on local loopback, not the PostgreSQL wire protocol. See the
+[Quack overview](https://duckdb.org/docs/2.0/quack/overview). The bundled
+`duckdb-sbx duckdb` command uses a client in the container and needs no host
+DuckDB installation. It connects through Quack rather than opening the file.
+
+Existing Linux file-only sandboxes migrate on the next `start`: port 0 becomes
+9494, an empty password is replaced with a generated token, and the container
+is recreated over the existing data branch.
 
 ## Requirements and installation
 
@@ -75,7 +122,7 @@ The binary still needs bsdkrun and, for Linux guests, the Docker CLI on the host
 | `start [linux\|freebsd\|netbsd] [VERSION]` | Create or resume the sandbox |
 | `stop` | Stop the container or cleanly shut down the BSD VM |
 | `status` | Show the guest, branch and database file |
-| `duckdb` | Open the SQL shell (`sql`, `cli` also work) |
+| `duckdb [ARGS...]` | Open the SQL shell or run CLI arguments (`sql`, `cli` also work) |
 | `exec CMD...` | Run a command in the guest; `-t` allocates a terminal |
 | `ssh` | Open a shell in the guest (alias: `shell`) |
 | `log [-f]` | Show guest logs (alias: `logs`); `--boot` shows VM boot logs |
@@ -83,7 +130,8 @@ The binary still needs bsdkrun and, for Linux guests, the Docker CLI on the host
 | `branch NAME --from SOURCE` | Fork another branch without switching |
 | `branch -d NAME` | Delete a branch (`branch rm NAME` also works) |
 | `checkout [-b] NAME` | Switch branches; `-b` creates first (alias: `switch`) |
-| `url` | Print the file location in the guest |
+| `url` | Print the Linux Quack URI, or the BSD file location |
+| `token` | Print the Linux Quack password/token |
 | `doctor` | Check host prerequisites and sandbox state |
 | `destroy [--yes]` | Remove the guest, data volume, all branches and state |
 
@@ -97,7 +145,8 @@ duckdb-sbx start --branch staging     # mount an existing branch
 duckdb-sbx start -d                   # skip streaming startup logs
 ```
 
-The database file is created when a client first opens it. The default name is
+The database file is created at Linux server startup, or on first client use
+on BSD. The default name is
 `duckdb`; names accept letters, digits, underscores and hyphens. The database
 name is recorded on first start and reused afterward.
 
@@ -115,8 +164,12 @@ containers return through their restart policies.
 
 The [official DuckDB Docker image](https://github.com/duckdb/duckdb-docker/blob/main/Dockerfile)
 is distroless. A cached build copies its CLI into Debian Bookworm with a shell,
-CA certificates and the C++ runtime. The container idles with `sleep infinity`;
-SQL clients run through `docker exec`. Custom image references are accepted
+CA certificates and the C++ runtime. The container runs `duckdb -serve`, configured to listen on guest port 9494
+with the selected password. Quack and httpfs extensions are installed into the
+image at build time. A small Docker init process forwards shutdown signals;
+stdin stays open so the CLI server remains alive without a terminal. SQL
+clients run through `docker exec` and connect to this server. Custom image
+references are accepted
 if they contain a compatible CLI at `/duckdb`, like the official image.
 
 ## Branches and file access
@@ -143,7 +196,7 @@ agent's PATH:
 
 ```sh
 # Linux
-duckdb-sbx exec duckdb /var/lib/duckdb/duckdb.duckdb -c 'SELECT 42;'
+duckdb-sbx duckdb -c 'SELECT 42;'
 # FreeBSD
 duckdb-sbx exec /usr/local/bin/duckdb /var/lib/duckdb/duckdb.duckdb -c 'SELECT 42;'
 # NetBSD
@@ -154,9 +207,12 @@ duckdb-sbx exec sh -c 'cat > /var/lib/duckdb/input.csv' < input.csv
 ```
 
 Files under `/var/lib/duckdb` belong to the branch. On Linux, other container
-files disappear when it is recreated; extensions installed in the container's
-home may need reinstalling after checkout. BSD root-disk files persist but
+files disappear when it is recreated; extra extensions installed after the
+runtime image was built may need reinstalling after checkout. BSD root-disk files persist but
 are shared across data branches. Use absolute paths for imported files.
+On Linux, use the Quack client for
+queries; opening the server's database file in another process will conflict
+with its file lock.
 
 ## State and troubleshooting
 
@@ -171,8 +227,8 @@ are shared across data branches. Use absolute paths for imported files.
 
 `XDG_CONFIG_HOME` overrides `~/.config`. `doctor` checks bsdkrun, the
 hypervisor and Node, plus Docker for a Linux sandbox. It requires neither
-Docker nor Python tools for an existing BSD sandbox. `log -f` shows guest logs;
-the Linux container normally has none. Use `log --boot` for VM startup issues.
+Docker nor Python tools for an existing BSD sandbox. `log -f` shows guest logs,
+including Linux Quack startup failures. Use `log --boot` for VM startup issues.
 NetBSD may reboot once to grow its root disk and once to load ZFS modules;
 startup handles both. Provisioning errors include the package manager output.
 
@@ -182,11 +238,12 @@ On 2026-11-20, using macOS/arm64 and bsdkrun 0.12.0:
 
 | Guest | Live result |
 | --- | --- |
+| Linux / DuckDB 2.0.0 | Served Quack on host loopback; host-client SQL, wrong-password rejection, password/port changes, stop/start persistence and isolated ZFS branch writes passed |
 | FreeBSD 14.3 | Booted, mounted ZFS, installed official DuckDB 1.5.6, and returned 42 from a SQL query |
 | NetBSD 11.99.11 (current) | Booted, resized the root disk, loaded ZFS after reboot, mounted the branch, and queried official DuckDB 1.5.5's version |
 | NetBSD 10.1 | bsdkrun's kernel download URL returned HTTP 404 before boot |
 
-Both installed packages were correctly rejected by the DuckDB >= 2 startup
+Both BSD packages were correctly rejected by the DuckDB >= 2 startup
 check, so an end-to-end BSD sandbox with DuckDB >= 2 remains unverified.
 NetBSD current also triggered Hypervisor.framework panics during shutdown;
 bsdkrun eventually stopped the VM through its timeout fallback. The live run
@@ -204,7 +261,8 @@ npm run build:bin
 
 Tests cover profiles, OS parsing, VM/container creation arguments, version
 guards and lifecycle/branch switching with mocked bsdkrun/Docker commands.
-They include package failures, old BSD packages and NetBSD reboots; they do
+They include port forwarding/collisions, password generation and rotation,
+package failures, old BSD packages and NetBSD reboots; they do
 not boot real VMs. A live smoke test on a fresh sandbox is:
 
 ```sh
