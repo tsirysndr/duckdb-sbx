@@ -17,7 +17,8 @@
     "test": "spago test && npm run test:cli",
     "prepare": "spago build",
     "build:bin": "spago build && mkdir -p dist && bun build --compile --minify bin/duckdb-sbx.js --outfile dist/duckdb-sbx",
-    "test:cli": "node --test test/*.test.mjs"
+    "test:cli": "node --test test/*.test.mjs",
+    "test:e2e": "bash scripts/ci/e2e.sh"
   },
   "dependencies": {
     "@bsdkrun/sdk": "^0.8.0"

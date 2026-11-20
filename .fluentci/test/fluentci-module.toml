@@ -1,0 +1,9 @@
+name = "duckdb-sbx-tests"
+version = "0.1.0"
+license = "MPL-2.0"
+description = "Install bsdkrun on Ubuntu and run DuckDB sandbox unit and real KVM/Quack/ZFS tests."
+sdk = "purescript"
+runtime = "component"
+entry = "entry.mjs"
+artifact = "dist/plugin.wasm"
+build = ["node", "build.mjs"]
