@@ -10,3 +10,5 @@ dist/
 .fluentci/dependencies/
 fluentci_modules/
 .fluentci/workflows/.lock
+
+.fluentci/setup.json

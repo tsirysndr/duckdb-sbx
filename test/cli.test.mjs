@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createServer } from 'node:net';
 import { once } from 'node:events';
-import { test } from 'node:test';
+import { test } from 'bun:test';
 
 const bin = resolve('bin/duckdb-sbx.js');
 const cli = (args, env = {}) => spawnSync(process.execPath, [bin, ...args], {

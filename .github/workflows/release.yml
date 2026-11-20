@@ -51,7 +51,7 @@ jobs:
         env:
           RELEASE_PLATFORM: ${{ matrix.platform }}
           BUN_TARGET: ${{ matrix.target }}
-        run: node scripts/ci/release.mjs
+        run: npm run build:release
       - uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.platform }}
@@ -74,20 +74,8 @@ jobs:
           pattern: release-*
           merge-multiple: true
           path: release-assets
-      - name: Check all targets and generate SHA256SUMS
-        run: |
-          set -euo pipefail
-          cd release-assets
-          test -f duckdb-sbx-darwin-aarch64.tar.gz
-          test -f duckdb-sbx-linux-x86_64.tar.gz
-          test -f duckdb-sbx-linux-arm64.tar.gz
-          sha256sum duckdb-sbx-*.tar.gz > SHA256SUMS
-      - name: Create the release and upload verified build outputs
+      - uses: ./.github/actions/setup-project
+      - name: Verify assets, generate checksums and publish the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release create "$RELEASE_TAG" --verify-tag --generate-notes --title "$RELEASE_TAG"
-          fi
-          gh release upload "$RELEASE_TAG" release-assets/*.tar.gz release-assets/SHA256SUMS --clobber
+        run: node bin/ci.js publish
