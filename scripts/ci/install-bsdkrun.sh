@@ -23,3 +23,16 @@ export PATH="$BSDKRUN_INSTALL/bin:$PATH"
 command -v gvproxy >/dev/null # The upstream installer treats this download as optional; CI does not.
 bsdkrun --version
 bsdkrun probe
+
+# BuildKit needs a real filesystem for its writable snapshots. The default
+# host-backed virtio-fs store fails on Linux when runc mounts /etc/hosts.
+# This runner is disposable; create the shared engine before the app can
+# auto-create one without a data disk. Existing engines are never removed.
+bsdkrun docker start --cpus 2 --mem 2048 --publish-bind 127.0.0.1 --disk-size 20G --json
+bsdkrun exec bsdkrun-docker sh -ec '
+  filesystem=$(stat -f -c %T /var/lib/docker)
+  if [ "$filesystem" != "ext2/ext3" ]; then
+    echo "Expected an ext4 Docker image store, got $filesystem" >&2
+    exit 1
+  fi
+'
