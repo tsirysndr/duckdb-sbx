@@ -19,21 +19,21 @@ assert name ok = unless ok (throw name)
 main :: Effect Unit
 main = do
   let
-    c = profile.defaults
-    st = { os: "linux", version: "latest", port: 0, user: "", password: "", db: c.db, branch: "feature", cpus: 2, mem: 1024 }
+    c = profile.defaults { password = "unit-secret" }
+    st = { os: "linux", version: "latest", port: 9494, user: "", password: "", db: c.db, branch: "feature", cpus: 2, mem: 1024 }
   assert "minimum DuckDB version" (not (versionAllowed "1.4.5") && not (versionAllowed "v1.5.6") && not (versionAllowed "duckdb/duckdb:1.4.5") && versionAllowed "2.0.0" && versionAllowed "3.0.0" && profile.defaultTag == "2.0.0")
   assert "official image tags" (profile.image "2.0.0" == "duckdb/duckdb:2.0.0")
   assert "custom image reference" (profile.image "ghcr.io/example/duckdb:dev" == "ghcr.io/example/duckdb:dev")
   assert "database path" (databaseFile "analytics" == "/var/lib/duckdb/analytics.duckdb")
-  assert "file location rather than a host URL" (profile.url "latest" c 0 == "file /var/lib/duckdb/duckdb.duckdb in the guest (no server)")
-  assert "embedded engine" (not profile.linuxOnly && not profile.hasServer && not profile.hasCredentials && not (profile.studioSupported Linux "latest"))
-  assert "no readiness lock on the persistent database" (profile.ready Linux "latest" c == [ "duckdb", ":memory:", "-c", "SELECT 1;" ])
+  assert "Quack URI" (profile.url "latest" c 9494 == "quack:127.0.0.1:9494")
+  assert "Linux Quack server" (not profile.linuxOnly && profile.hasServer && not profile.hasCredentials && not (profile.studioSupported Linux "latest"))
+  assert "readiness queries the remote server" (profile.ready Linux "latest" c == [ "duckdb-sbx-client", "-noheader", "-csv", "-c", "SELECT 1;" ])
   case profile.client of
-    Guest args -> assert "interactive CLI uses selected database" (args Linux "latest" (c { db = "analytics" }) == [ "duckdb", "/var/lib/duckdb/analytics.duckdb" ])
+    Guest args -> assert "Linux CLI connects to the server" (args Linux "latest" (c { db = "analytics" }) == [ "duckdb-sbx-client" ])
     _ -> throw "expected guest CLI"
   assert "branch mountpoint" (mountPoint profile "feature" == "/mnt/duckdb-sbx-feature")
-  assert "container mounts chosen branch without publishing a port"
-    (runArgs profile st c == [ "run", "-d", "--name", "duckdb-sbx", "--restart", "unless-stopped", "-v", "/mnt/duckdb-sbx-feature:/var/lib/duckdb", "duckdb-sbx-runtime" ])
+  assert "container keeps stdin open and publishes authenticated Quack"
+    (runArgs profile st c == [ "run", "-d", "-i", "--init", "--name", "duckdb-sbx", "--restart", "unless-stopped", "-p", "9494:9494", "-v", "/mnt/duckdb-sbx-feature:/var/lib/duckdb", "-e", "SBX_DB=duckdb", "-e", "SBX_PASSWORD=unit-secret", "duckdb-sbx-runtime" ])
   assert "switch mounts another branch" (Array.elem "/mnt/duckdb-sbx-main:/var/lib/duckdb" (runArgs profile (st { branch = "main" }) c))
   case profile.containerDockerfile of
     Nothing -> throw "official distroless image needs a runtime wrapper"
