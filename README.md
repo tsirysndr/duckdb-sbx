@@ -140,8 +140,8 @@ duckdb-sbx doctor
 duckdb-sbx start
 ```
 
-The bsdkrun PureScript SDK is pinned in `spago.yaml`; no sibling checkout is
-required. To build a standalone executable with Bun:
+The bsdkrun PureScript SDK is pinned in `spago.yaml`.
+To build a standalone executable with Bun:
 
 ```sh
 npm run build:bin                     # dist/duckdb-sbx
