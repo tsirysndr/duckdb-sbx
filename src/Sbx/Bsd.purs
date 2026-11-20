@@ -29,12 +29,14 @@ import Foreign.Object as Object
 import Sbx.Cli (BranchOpts, Command(..), StartOpts)
 import Sbx.DuckDB (databaseFile, versionCommand, versionMajor)
 import Sbx.Native as Native
+import Sbx.Identity as Identity
 import Sbx.Profile (ClientCmd(..), Creds, Os(..), Profile, osName, parseOs)
 import Sbx.State (State)
 import Sbx.State as State
 
 run :: Profile -> Os -> Command -> Aff Int
 run p os = case _ of
+  OnBranch _ _ -> fail "Internal branch dispatch error"
   Start o -> start p os o
   Stop -> do
     m <- findMachine p
@@ -79,7 +81,7 @@ requireRunning p = do
   pure box
 
 findVolume :: Profile -> Aff (Maybe ZfsVolumeInfo)
-findVolume p = Zfs.list <#> Array.find (_.name >>> eq p.tool)
+findVolume p = Zfs.list <#> Array.find (_.name >>> eq (Identity.volumeName p.tool))
 
 requireVolume :: Profile -> Aff ZfsVolumeInfo
 requireVolume p = findVolume p >>= maybe (fail ("no data volume yet — run `" <> p.tool <> " start` first")) pure
@@ -96,7 +98,7 @@ currentBranch :: Profile -> Aff String
 currentBranch p = do
   vol <- findVolume p
   st <- liftEffect (State.load p.tool)
-  pure $ fromMaybe "main" ((vol >>= mountedBranch) <|> (st <#> _.branch))
+  pure $ fromMaybe "main" ((st <#> _.branch) <|> (vol >>= mountedBranch))
 
 branchNames :: ZfsVolumeInfo -> Array String
 branchNames vol = Array.nub ([ "main" ] <> map _.name vol.branches)
@@ -214,7 +216,7 @@ createOptions p os st =
   # Options.withName p.tool
   # Options.withCpus st.cpus
   # Options.withMem st.mem
-  # Options.withZfs [ Zfs.target p.tool (Just st.branch) <> ":" <> p.dataDir os ]
+  # Options.withZfs [ Zfs.target (Identity.volumeName p.tool) (Just st.branch) <> ":" <> p.dataDir os ]
 
 start :: Profile -> Os -> StartOpts -> Aff Int
 start p os o = do
@@ -252,8 +254,8 @@ start p os o = do
       let cur = fromMaybe (fromMaybe "main" (map _.branch previous)) (mountedBranch vol)
       when (cur /= st.branch) do
         when info.running $ void (B.stop box)
-        void (Zfs.detach (Zfs.target p.tool (Just cur)) info.id)
-        void (Zfs.attachAt (Zfs.target p.tool (Just st.branch)) info.id (Just (p.dataDir os)))
+        void (Zfs.detach (Zfs.target (Identity.volumeName p.tool) (Just cur)) info.id)
+        void (Zfs.attachAt (Zfs.target (Identity.volumeName p.tool) (Just st.branch)) info.id (Just (p.dataDir os)))
       let resourcesChanged = maybe false (\s -> s.cpus /= st.cpus || s.mem /= st.mem) previous
       when resourcesChanged do
         up <- B.isRunning box
@@ -317,7 +319,7 @@ branch' p o = case o.name, o.delete of
     when (name == "main") $ fail "main cannot be deleted; `destroy` removes the whole volume"
     when (name == cur) $ fail ("'" <> name <> "' is the mounted branch; checkout another one first")
     unless (Array.elem name (branchNames vol)) $ fail ("no branch '" <> name <> "'")
-    Zfs.destroy [ Zfs.target p.tool (Just name) ] false
+    Zfs.destroy [ Zfs.target (Identity.volumeName p.tool) (Just name) ] false
     say ("Deleted branch '" <> name <> "'")
     pure 0
   Just name, false -> do
@@ -327,7 +329,7 @@ branch' p o = case o.name, o.delete of
     when (Array.elem name (branchNames vol)) $ fail ("branch '" <> name <> "' already exists")
     unless (Array.elem from (branchNames vol)) $ fail ("no branch '" <> from <> "' to fork from")
     say ("Forking " <> from <> " -> " <> name <> " ...")
-    _ <- Zfs.branch p.tool name (Just from)
+    _ <- Zfs.branch (Identity.volumeName p.tool) name (Just from)
     say ("Branch '" <> name <> "' created. Switch to it with `" <> p.tool <> " checkout " <> name <> "`")
     pure 0
   where
@@ -338,10 +340,10 @@ checkout p o = do
   vol <- requireVolume p
   st <- requireState p
   os <- maybe (fail "unknown guest OS") pure (parseOs st.os)
-  let cur = fromMaybe st.branch (mountedBranch vol)
+  let cur = st.branch
   when o.create do
     when (Array.elem o.name (branchNames vol)) $ fail "branch already exists"
-    void (Zfs.branch p.tool o.name (Just cur))
+    void (Zfs.branch (Identity.volumeName p.tool) o.name (Just cur))
   unless (o.create || Array.elem o.name (branchNames vol)) $ fail ("no branch '" <> o.name <> "'")
   if o.name == cur then say ("already on '" <> cur <> "'") $> 0
   else do
@@ -350,8 +352,8 @@ checkout p o = do
     for_ m \info -> do
       box <- B.get info.id
       when info.running $ void (B.stop box)
-      void (Zfs.detach (Zfs.target p.tool (Just cur)) info.id)
-      void (Zfs.attachAt (Zfs.target p.tool (Just o.name)) info.id (Just (p.dataDir os)))
+      void (Zfs.detach (Zfs.target (Identity.volumeName p.tool) (Just cur)) info.id)
+      void (Zfs.attachAt (Zfs.target (Identity.volumeName p.tool) (Just o.name)) info.id (Just (p.dataDir os)))
       liftEffect (State.save p.tool st')
       when info.running do
         void (B.start box)
@@ -388,7 +390,7 @@ destroy p yes = do
     for_ m \info -> do
       box <- B.get info.id
       when info.running $ void (B.stop box)
-      for_ vol \_ -> void (Zfs.detach (Zfs.target p.tool Nothing) info.id)
+      for_ vol \_ -> void (Zfs.detach (Zfs.target (Identity.volumeName p.tool) Nothing) info.id)
       void (B.remove true box)
     for_ vol \v -> Zfs.destroy [ v.name ] true
     liftEffect (State.clear p.tool)

@@ -28,6 +28,8 @@ import Effect.Exception (error, message)
 import Sbx.Bsd as Bsd
 import Sbx.Cli (BranchOpts, Command(..), StartOpts)
 import Sbx.Engine as Engine
+import Sbx.Identity as Identity
+import Sbx.Parallel as Parallel
 import Sbx.DuckDB (versionAllowed, versionMajor)
 import Sbx.Native as Native
 import Sbx.Profile (ClientCmd(..), Creds, Os(..), Profile, osName, parseOs)
@@ -35,7 +37,10 @@ import Sbx.State (State)
 import Sbx.State as State
 
 run :: Profile -> Command -> Aff Int
-run p cmd = do
+run = Parallel.run runBase
+
+runBase :: Profile -> Command -> Aff Int
+runBase p cmd = do
   saved <- liftEffect (State.load p.tool)
   let requested = case cmd of
         Start o -> o.os
@@ -48,6 +53,7 @@ run p cmd = do
 
 runLinux :: Profile -> Command -> Aff Int
 runLinux p = case _ of
+  OnBranch _ _ -> fail "Internal branch dispatch error"
   Start o -> start p o
   Stop -> stop p
   Status -> status p
@@ -72,7 +78,7 @@ fail :: forall a. String -> Aff a
 fail = throwError <<< error
 
 findVolume :: Profile -> Aff (Maybe ZfsVolumeInfo)
-findVolume p = Zfs.list <#> Array.find (_.name >>> eq p.tool)
+findVolume p = Zfs.list <#> Array.find (_.name >>> eq (Identity.volumeName p.tool))
 
 requireVolume :: Profile -> Aff ZfsVolumeInfo
 requireVolume p = findVolume p >>= maybe (fail ("no data volume yet — run `" <> p.tool <> " start` first")) pure
@@ -100,7 +106,7 @@ currentBranch :: Profile -> Aff String
 currentBranch p = do
   vol <- findVolume p
   st <- liftEffect (State.load p.tool)
-  pure $ fromMaybe "main" ((vol >>= mountedBranch) <|> (st <#> _.branch))
+  pure $ fromMaybe "main" ((st <#> _.branch) <|> (vol >>= mountedBranch))
 
 branchNames :: ZfsVolumeInfo -> Array String
 branchNames vol = Array.nub ([ "main" ] <> map _.name vol.branches)
@@ -319,7 +325,7 @@ branch' p o = case o.name, o.delete of
     unless (Array.elem name (branchNames vol)) $ fail ("no branch '" <> name <> "'")
     Engine.ensureEngine
     Engine.ensureAttached p vol cur
-    Zfs.destroy [ Zfs.target p.tool (Just name) ] false
+    Zfs.destroy [ Zfs.target (Identity.volumeName p.tool) (Just name) ] false
     say ("Deleted branch '" <> name <> "'")
     pure 0
   Just name, false -> do
@@ -331,7 +337,7 @@ branch' p o = case o.name, o.delete of
     Engine.ensureEngine
     Engine.ensureAttached p vol cur
     say ("Forking " <> from <> " -> " <> name <> " ...")
-    _ <- Zfs.branch p.tool name (Just from)
+    _ <- Zfs.branch (Identity.volumeName p.tool) name (Just from)
     say ("Branch '" <> name <> "' created. Switch to it with `" <> p.tool <> " checkout " <> name <> "`")
     pure 0
   where
@@ -347,7 +353,7 @@ checkout p o = do
     Engine.ensureEngine
     Engine.ensureAttached p vol cur
     say ("Forking " <> cur <> " -> " <> o.name <> " ...")
-    void (Zfs.branch p.tool o.name (Just cur))
+    void (Zfs.branch (Identity.volumeName p.tool) o.name (Just cur))
   unless (o.create || Array.elem o.name (branchNames vol)) $
     fail ("no branch '" <> o.name <> "' (`" <> p.tool <> " branch` lists them; `checkout -b " <> o.name <> "` creates it)")
   if o.name == cur then say ("already on '" <> o.name <> "'") $> 0

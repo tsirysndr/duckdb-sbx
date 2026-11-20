@@ -36,6 +36,7 @@ import Effect.Console (log)
 import Effect.Exception (error)
 import Foreign.Object as Object
 import Sbx.Native as Native
+import Sbx.Identity as Identity
 import Sbx.Profile (Creds, Os(..), Profile)
 import Sbx.State (State)
 
@@ -113,7 +114,7 @@ ensureAttached p vol branch
       let mounted = mountedInEngine vol
       unless (Array.any (\m -> m.branch == branch && m.mountpoint == mountPoint p branch) mounted) $
         void (Zfs.attachAt (target p branch) Docker.machineName (Just (mountPoint p branch)))
-      for_ (Array.filter (_.branch >>> (_ /= branch)) mounted) \m -> void (Zfs.detach (target p m.branch) Docker.machineName)
+      for_ (Array.filter (\m -> m.branch /= branch && String.take (String.length ("/mnt/" <> p.tool <> "-")) m.mountpoint == "/mnt/" <> p.tool <> "-") mounted) \m -> void (Zfs.detach (target p m.branch) Docker.machineName)
   | otherwise = do
       st <- Docker.status
       -- Nothing to attach to until the engine VM exists.
@@ -126,11 +127,11 @@ ensureAttached p vol branch
       ensureEngine
 
 target :: Profile -> String -> String
-target p b = Zfs.target p.tool (Just b)
+target p b = Zfs.target (Identity.volumeName p.tool) (Just b)
 
 -- | Let go of the whole volume (every branch) in the engine.
 detachVolume :: Profile -> ZfsVolumeInfo -> Aff Unit
-detachVolume p vol = when (heldByEngine vol) $ void (Zfs.detach (Zfs.target p.tool Nothing) Docker.machineName)
+detachVolume p vol = when (heldByEngine vol) $ void (Zfs.detach (Zfs.target (Identity.volumeName p.tool) Nothing) Docker.machineName)
 
 -- | The tool's container, running or not; `Nothing` while the engine is
 -- | down, since nothing can be asked.
@@ -158,19 +159,21 @@ removeContainer p = container p >>= \c -> for_ c \_ -> do
 pullImage :: Profile -> State -> Boolean -> Aff Unit
 pullImage p st stream = case p.containerDockerfile of
   Just dockerfile -> do
-    dir <- liftEffect do
-      d <- Native.configDir p.tool <#> \c -> Native.pathJoin c "runtime"
-      Native.mkdirp d
-      Native.writeText (Native.pathJoin d "Dockerfile") (dockerfile (p.image st.version))
-      pure d
-    code <- Docker.dockerAttached [ "build", "-t", runtimeImage p st, dir ]
-    unless (code == 0) $ throwError (error "building the DuckDB runtime image failed")
+    have <- Docker.docker ["image", "inspect", runtimeImage p st] <#> (_.exitCode >>> eq 0)
+    unless (Identity.isInstance p.tool && have) do
+      dir <- liftEffect do
+        d <- Native.configDir p.tool <#> \c -> Native.pathJoin c "runtime"
+        Native.mkdirp d
+        Native.writeText (Native.pathJoin d "Dockerfile") (dockerfile (p.image st.version))
+        pure d
+      code <- Docker.dockerAttached [ "build", "-t", runtimeImage p st, dir ]
+      unless (code == 0) $ throwError (error "building the DuckDB runtime image failed")
   Nothing -> pullOriginal p st stream
 
 runtimeImage :: Profile -> State -> String
 runtimeImage p st = case p.containerDockerfile of
   Nothing -> p.image st.version
-  Just _ -> p.tool <> "-runtime"
+  Just _ -> Identity.volumeName p.tool <> "-runtime"
 
 pullOriginal :: Profile -> State -> Boolean -> Aff Unit
 pullOriginal p st stream = do
