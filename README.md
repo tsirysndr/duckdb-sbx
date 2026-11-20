@@ -93,10 +93,45 @@ is recreated over the existing data branch.
 - macOS on Apple Silicon, or Linux with KVM.
 - [bsdkrun](https://github.com/tsirysndr/bsdkrun#install) 0.12.1 or newer
   (`brew install tsirysndr/tap/bsdkrun` on macOS).
-- Node.js 22 or newer.
 - For Linux guests, the Docker CLI (`brew install docker` on macOS).
   Docker Desktop is unnecessary: bsdkrun supplies the engine VM.
 - Network access on first start for images or official BSD packages.
+
+### Homebrew
+
+```sh
+brew install tsirysndr/tap/duckdb-sbx
+duckdb-sbx doctor
+duckdb-sbx start linux 2.0.0
+```
+
+The formula installs bsdkrun and the Docker CLI as dependencies.
+
+### Install script
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/tsirysndr/duckdb-sbx/main/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
+duckdb-sbx doctor
+duckdb-sbx start linux 2.0.0
+```
+
+The installer downloads the latest release for macOS Apple Silicon, Linux
+x86_64 or Linux ARM64, verifies it against the release's `SHA256SUMS`, and
+installs to `~/.local/bin`. Prebuilt binaries need neither Node.js nor Bun.
+Install bsdkrun and the Docker CLI separately before starting a sandbox.
+Add the PATH setting to your shell profile to keep it across sessions.
+
+To select a release or installation directory:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/tsirysndr/duckdb-sbx/main/install.sh | sh -s -- v0.1.0
+curl -fsSL https://raw.githubusercontent.com/tsirysndr/duckdb-sbx/main/install.sh | DUCKDB_SBX_INSTALL_DIR="$HOME/bin" sh
+```
+
+### From source
+
+Requires Node.js 22 or newer.
 
 ```sh
 npm install                          # installs dependencies and builds PureScript
