@@ -62,7 +62,8 @@ ensureEngine = do
       ( if isNothing (toMaybe st.machineId) then "Creating the Docker engine VM '" <> Docker.machineName <> "' (2 vCPU, 2048 MiB; shared by every Linux sandbox) ..."
         else "Starting the Docker engine VM '" <> Docker.machineName <> "' ..."
       )
-    -- Published ports land on the host's loopback only.
+    -- Restarting a live proxy loses its record of existing gvproxy forwards.
+    -- Reuse running engines; App verifies the resulting host listener.
     void (Docker.start { cpus: 2, mem: 2048, publishBind: Just "127.0.0.1" })
 
 heldByEngine :: ZfsVolumeInfo -> Boolean
@@ -119,7 +120,9 @@ isRunning p = container p <#> maybe false (_.state >>> eq "running")
 -- | settings.
 removeContainer :: Profile -> Aff Unit
 removeContainer p = container p >>= \c -> for_ c \_ -> do
-  r <- Docker.docker [ "rm", "-f", containerName p ]
+  stopped <- Docker.docker [ "stop", containerName p ]
+  unless (stopped.exitCode == 0) $ throwError (error ("docker stop: " <> String.trim stopped.stderr))
+  r <- Docker.docker [ "rm", containerName p ]
   unless (r.exitCode == 0) $ throwError (error ("docker rm: " <> String.trim r.stderr))
 
 -- | The image present in the engine, pulling it (with progress when
@@ -166,7 +169,7 @@ runContainer p st c = do
 -- | without starting the shared engine.
 runArgs :: Profile -> State -> Creds -> Array String
 runArgs p st c =
-  [ "run", "-d", "--name", containerName p, "--restart", "unless-stopped" ]
+  [ "run", "-d", "-i", "--init", "--name", containerName p, "--restart", "unless-stopped" ]
   <> (if p.hasServer then [ "-p", show st.port <> ":" <> show p.guestPort ] else [])
   <> [ "-v", mountPoint p st.branch <> ":" <> p.dataDir Linux ]
   <> Array.concat (Object.toArrayWithKey (\k v -> [ "-e", k <> "=" <> v ]) (p.env c))

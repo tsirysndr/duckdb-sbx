@@ -35,13 +35,13 @@ type Profile =
   { tool :: String -- ^ the command name; also the machine and volume name
   , product :: String -- ^ "DuckDB"
   , hasServer :: Boolean -- ^ publish and wait for a TCP port
-  , containerDockerfile :: Maybe (String -> String) -- ^ wrap a CLI-only image with a shell and an idle process
+  , containerDockerfile :: Maybe (String -> String) -- ^ wrap the official CLI image with server/client scripts
   , guestPort :: Int -- ^ the port the server listens on inside the guest
   , defaultTag :: String -- ^ Linux image tag when none is given
   , image :: String -> String -- ^ Linux image for a tag (or a full reference)
   , versionNote :: String -- ^ appended to the VERSION help: other values the tag may take
   , linuxOnly :: Boolean -- ^ only a Linux container in the engine
-  , hasCredentials :: Boolean -- ^ whether --user/--password mean anything
+  , hasCredentials :: Boolean -- ^ whether SQL user credentials are offered
   , defaults :: Creds
   , rootDisk :: Os -> Maybe String
   , provision :: Os -> Maybe String

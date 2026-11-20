@@ -5,6 +5,7 @@ import Prelude
 import Bsdkrun as B
 import Bsdkrun.Docker as Docker
 import Bsdkrun.Host as Host
+import Bsdkrun.Port as Port
 import Bsdkrun.Sandbox as Sandbox
 import Bsdkrun.Types (ZfsVolumeInfo)
 import Bsdkrun.Zfs as Zfs
@@ -56,7 +57,8 @@ runLinux p = case _ of
   Branch o -> branch p o
   Checkout o -> checkout p o
   Url -> url p
-  Client -> client p
+  Client args -> client p args
+  Token -> requireState p >>= \st -> say st.password $> 0
   Fancy -> fancy p
   Doctor -> doctor p
   Destroy o -> destroy p o
@@ -138,6 +140,23 @@ withContainerLogs true p act = do
   follower <- forkAff (void (attempt (Docker.dockerAttached [ "logs", "-f", Engine.containerName p ])))
   finally (killFiber (error "log stream closed") follower) act
 
+-- | Forwarding is asynchronous, so wait for both the SQL probe in the
+-- | container and the engine's loopback listener before declaring readiness.
+waitHostPort :: Profile -> Int -> Aff Unit
+waitHostPort p port = do
+  waitFor ("host port " <> show port) 30 (not <$> Port.isFree port)
+  local <- liftEffect (Native.loopbackListener port)
+  unless local do
+    Engine.removeContainer p
+    fail "the engine published Quack beyond loopback; run `bsdkrun docker stop`, then `bsdkrun docker start --publish-bind 127.0.0.1`, and restart the sandbox"
+
+ensurePort :: Profile -> Int -> Aff Unit
+ensurePort p port = do
+  result <- attempt $ waitFor ("host port " <> show port <> " to become free") 30 (Port.isFree port)
+  case result of
+    Right _ -> pure unit
+    Left _ -> fail ("host port " <> show port <> " is in use; choose another with `" <> p.tool <> " start --port PORT`")
+
 ready :: Profile -> State -> Aff Unit
 ready p st = do
   say (p.product <> " is ready" <> (if p.hasServer then " on 127.0.0.1:" <> show st.port else "") <> " (branch " <> st.branch <> ")")
@@ -152,21 +171,27 @@ startLinux :: Profile -> StartOpts -> Maybe State -> Aff Int
 startLinux p o previous = do
   for_ previous \s -> do
     for_ o.version \v -> when (v /= s.version) $ fail ("this sandbox was created with version '" <> s.version <> "'; `" <> p.tool <> " destroy` to change it")
-    when (isJust o.user || isJust o.password || isJust o.db) $ say "note: credentials and the database were set when the data was initialised; the flags are ignored"
+    when (isJust o.user || isJust o.db) $ say "note: credentials and the database were set when the data was initialised; the flags are ignored"
+  generatedPassword <- liftEffect Native.randomPassword
   let
     version = fromMaybe p.defaultTag (map _.version previous <|> o.version)
     c = case previous of
-      Just s -> creds s
-      Nothing -> { user: fromMaybe p.defaults.user o.user, password: fromMaybe p.defaults.password o.password, db: fromMaybe p.defaults.db o.db }
-    port = fromMaybe (maybe p.guestPort _.port previous) o.port
+      Just s -> { user: s.user, password: fromMaybe (if s.password == "" then generatedPassword else s.password) o.password, db: s.db }
+      Nothing -> { user: "", password: fromMaybe generatedPassword o.password, db: fromMaybe p.defaults.db o.db }
+    port = fromMaybe (maybe p.guestPort (\s -> if s.port == 0 then p.guestPort else s.port) previous) o.port
     cpus = fromMaybe (maybe 2 _.cpus previous) o.cpus
     mem = fromMaybe (maybe 1024 _.mem previous) o.mem
     size = fromMaybe "10G" o.size
   when (version == "" || Array.any (\w -> String.contains (String.Pattern w) version) [ " ", "\n", "\r", "\t" ]) $
     fail "VERSION must be an image tag or reference without whitespace"
-  when (not p.hasServer && (c.db == "" || not (Array.all (\ch -> (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_' || ch == '-') (CU.toCharArray c.db)))) $
+  when (c.db == "" || not (Array.all (\ch -> (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_' || ch == '-') (CU.toCharArray c.db))) $
     fail "database name must contain only letters, digits, underscores or hyphens"
+  when (String.length c.password < 4) $ fail "password must contain at least 4 characters"
+  when (port < 1 || port > 65535) $ fail "port must be between 1 and 65535"
   unless (versionAllowed version) $ fail "duckdb-sbx requires DuckDB >= 2; choose a 2.x or newer image tag"
+  when (maybe true (\s -> s.port /= port) previous) do
+    free <- Port.isFree port
+    unless free $ fail ("host port " <> show port <> " is in use; choose another with --port")
   vol <- findVolume p >>= case _ of
     Just v -> pure v
     Nothing -> do
@@ -179,10 +204,12 @@ startLinux p o previous = do
     fail ("no branch '" <> branchName <> "'; branches: " <> String.joinWith ", " (branchNames vol))
   let st = { os: "linux", version, port, user: c.user, password: c.password, db: c.db, branch: branchName, cpus, mem }
   running <- Engine.isRunning p
-  let unchanged = maybe false (\s -> s.port == port && s.branch == branchName && branchName == cur) previous
+  let unchanged = maybe false (\s -> s.port == port && s.password == c.password && s.branch == branchName && branchName == cur) previous
   when (isJust o.cpus || isJust o.mem) $ say ("note: on Linux --cpus/--mem do not limit the container; the engine VM is sized with `bsdkrun docker start --cpus N --mem M`")
   if running && unchanged then do
     checkVersion p
+    waitReady p st
+    waitHostPort p st.port
     say (p.tool <> " is already running (container in " <> Docker.machineName <> ", " <> p.image version <> ")")
     ready p st
     pure 0
@@ -193,11 +220,13 @@ startLinux p o previous = do
     Engine.ensureEngine
     Engine.removeContainer p
     Engine.ensureAttached p vol branchName
+    ensurePort p port
     liftEffect (State.save p.tool st)
     Engine.pullImage p st (not o.detach)
     Engine.runContainer p st c
     checkVersion p
     withContainerLogs (not o.detach) p (waitReady p st)
+    waitHostPort p st.port
     ready p st
     pure 0
 
@@ -226,7 +255,7 @@ status p = do
       row "engine" (Docker.machineName <> if engine.running then " RUNNING" else " STOPPED")
       row "image" (p.image saved.version)
       row "branch" cur
-      row "file" (p.url saved.version (creds saved) saved.port)
+      row "url" (p.url saved.version (creds saved) saved.port)
       when (maybe false (_.state >>> eq "running") c) do
         ok <- probeIn p (p.ready Linux saved.version (creds saved))
         row "database" (if ok then "ready" else "not ready yet")
@@ -330,6 +359,7 @@ checkout p o = do
       Engine.runContainer p st' (creds st)
       checkVersion p
       waitReady p st'
+      waitHostPort p st'.port
     say ("Switched to branch '" <> o.name <> "'")
     pure 0
 
@@ -339,15 +369,17 @@ url p = do
   say (p.url st.version (creds st) st.port)
   pure 0
 
-client :: Profile -> Aff Int
-client p = do
+client :: Profile -> Array String -> Aff Int
+client p args = do
   { state: st } <- requireRunning p
   case p.client of
-    Guest argv -> Docker.dockerAttached ([ "exec", "-it", Engine.containerName p ] <> argv Linux st.version (creds st))
+    Guest argv -> do
+      tty <- liftEffect Native.isTty
+      Docker.dockerAttached ([ "exec", if tty then "-it" else "-i", Engine.containerName p ] <> argv Linux st.version (creds st) <> args)
     Host _ -> fail "DuckDB clients run inside the Linux container"
 
 fancy :: Profile -> Aff Int
-fancy = client
+fancy p = client p []
 
 doctor :: Profile -> Aff Int
 doctor p = do

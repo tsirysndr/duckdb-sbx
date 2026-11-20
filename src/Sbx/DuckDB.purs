@@ -1,5 +1,4 @@
--- | DuckDB is embedded: keep the branch mounted in an idle container and
--- | open the database only for the lifetime of a client. There is no server.
+-- | Linux serves the branch database over Quack; BSD packages keep file access.
 module Sbx.DuckDB (profile, databaseFile, versionAllowed, versionMajor, versionCommand) where
 
 import Prelude
@@ -8,6 +7,7 @@ import Data.Array as Array
 import Data.Int as Int
 import Data.String as String
 import Foreign.Object as Object
+import Data.Tuple.Nested ((/\))
 import Sbx.Profile (ClientCmd(..), Os(..), Profile, shellQuote, withBsdPath)
 
 databaseFile :: String -> String
@@ -32,24 +32,27 @@ profile :: Profile
 profile =
   { tool: "duckdb-sbx"
   , product: "DuckDB"
-  , hasServer: false
-  , guestPort: 0
+  , hasServer: true
+  , guestPort: 9494
   , defaultTag: "2.0.0"
   , image: \tag ->
       if String.contains (String.Pattern "/") tag || String.contains (String.Pattern ":") tag then tag
       else "duckdb/duckdb:" <> tag
-  -- The official image is distroless: it contains /duckdb but no shell or
-  -- sleep. Copy its CLI into Debian for ssh/exec and an idle PID 1.
+  -- The official image is distroless. Copy its CLI into Debian for
+  -- server/client scripts and ssh/exec.
   , containerDockerfile: Just \image -> String.joinWith "\n"
       [ "FROM " <> image <> " AS duckdb"
       , "FROM debian:bookworm-slim"
       , "RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libstdc++6 && rm -rf /var/lib/apt/lists/*"
       , "COPY --from=duckdb /duckdb /usr/local/bin/duckdb"
       , "WORKDIR /var/lib/duckdb"
-      , "CMD [\"sleep\", \"infinity\"]"
+      , "RUN duckdb :memory: -no-init -c 'INSTALL quack; INSTALL httpfs;'"
+      , installScript "/usr/local/bin/duckdb-sbx-server" serverScript
+      , installScript "/usr/local/bin/duckdb-sbx-client" clientScript
+      , "CMD [\"duckdb-sbx-server\"]"
       , ""
       ]
-  , versionNote: ". Requires DuckDB >= 2. DuckDB opens a file inside the guest; no TCP server or Drizzle support"
+  , versionNote: ". Requires DuckDB >= 2. Linux serves Quack on port 9494; BSD guests use file access. No Drizzle support"
   , linuxOnly: false
   , hasCredentials: false
   , defaults: { user: "", password: "", db: "duckdb" }
@@ -61,20 +64,20 @@ profile =
       FreeBSD -> Just freebsd
       NetBSD -> Just netbsd
   , dataDir: const "/var/lib/duckdb"
-  , env: const Object.empty
+  , env: \c -> Object.fromFoldable [ "SBX_DB" /\ c.db, "SBX_PASSWORD" /\ c.password ]
   , command: const Nothing
-  -- Probe an in-memory database: opening the branch's file could contend
-  -- with a user's active writer. The file is created on first client use.
+  -- Probe Linux through Quack: a second writer must never open its file.
+  -- BSD remains an embedded CLI until suitable packages are available.
   , ready: \os _ _ -> case os of
-      Linux -> [ "duckdb", ":memory:", "-c", "SELECT 1;" ]
+      Linux -> [ "duckdb-sbx-client", "-noheader", "-csv", "-c", "SELECT 1;" ]
       _ -> withBsdPath "duckdb :memory: -c 'SELECT 1;'"
   , client: Guest \os _ c -> case os of
-      Linux -> [ "duckdb", databaseFile c.db ]
+      Linux -> [ "duckdb-sbx-client" ]
       _ -> withBsdPath ("duckdb " <> shellQuote (databaseFile c.db))
   , clientName: "duckdb"
   , clientAliases: [ "sql" ]
   , fancy: { name: "cli" }
-  , url: \_ c _ -> "file " <> databaseFile c.db <> " in the guest (no server)"
+  , url: \_ _ port -> "quack:127.0.0.1:" <> show port
   , studioSupported: \_ _ -> false
   }
 
@@ -100,4 +103,27 @@ netbsd = String.joinWith "\n"
   , "export PKG_PATH=\"https://cdn.NetBSD.org/pub/pkgsrc/packages/NetBSD/$A/$(uname -r | cut -d. -f1).0/All/\""
   , "command -v duckdb >/dev/null 2>&1 || pkg_add duckdb"
   , "mkdir -p /var/lib/duckdb"
+  ]
+
+-- | Constant scripts read credentials from the environment, not command-line
+-- | SQL interpolation. Restrict the external endpoint to host loopback in bsdkrun.
+installScript :: String -> Array String -> String
+installScript path lines = "RUN printf '%s\\n' " <> String.joinWith " " (map shellQuote lines) <> " > " <> path <> " && chmod 755 " <> path
+
+serverScript :: Array String
+serverScript =
+  [ "#!/bin/sh"
+  , "set -eu"
+  , ": \"${SBX_DB:?}\" \"${SBX_PASSWORD:?}\""
+  , "printf '%s\\n' " <> shellQuote serveInit <> " > /tmp/duckdb-sbx-serve.init"
+  , "exec duckdb \"/var/lib/duckdb/$SBX_DB.duckdb\" -no-agent -init /tmp/duckdb-sbx-serve.init -serve"
+  ]
+  where
+  serveInit = ".serve_command \"SELECT listen_url FROM quack_serve('quack:0.0.0.0:9494', allow_other_hostname = true, disable_ssl = true, token = getenv('SBX_PASSWORD'));\""
+
+clientScript :: Array String
+clientScript =
+  [ "#!/bin/sh"
+  , "set -eu"
+  , "exec duckdb :memory: -no-agent -no-init -bail -cmd \"ATTACH 'quack:127.0.0.1:9494' AS sbx (TOKEN getenv('SBX_PASSWORD')); CONNECT sbx;\" \"$@\""
   ]

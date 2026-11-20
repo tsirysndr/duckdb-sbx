@@ -42,7 +42,8 @@ data Command
   | Branch BranchOpts
   | Checkout { name :: String, create :: Boolean }
   | Url
-  | Client
+  | Client (Array String)
+  | Token
   | Fancy
   | Doctor
   | Destroy { yes :: Boolean }
@@ -61,12 +62,12 @@ startP p = ado
   version <- optional $ strArgument $ fold
     [ metavar "VERSION", help ("Linux: image tag, e.g. " <> p.defaultTag <> ", or a full image reference (default: " <> p.defaultTag <> ")" <> p.versionNote <> ". FreeBSD/NetBSD: OS release (default latest), DuckDB comes from official packages") ]
   port <- if p.hasServer then optional $ option int $ fold
-    [ long "port", short 'p', metavar "PORT", help ("Host port forwarded to " <> p.product <> " (default: " <> show p.guestPort <> ")") ]
+    [ long "port", short 'p', metavar "PORT", help ("Linux Quack host port forwarded to " <> p.product <> " (default: " <> show p.guestPort <> ")") ]
     else pure Nothing
   user <- credential "user" ("Superuser name (default: " <> p.defaults.user <> ")")
-  password <- credential "password" ("Its password (default: " <> p.defaults.password <> ")")
+  password <- optional $ strOption $ fold [ long "password", metavar "SECRET", help "Linux Quack password/token (minimum 4 characters; generated when omitted). Set again to rotate it" ]
   db <- optional $ strOption $ fold
-    [ long "db", metavar "NAME", help ("Database filename, created on first client use (default: " <> p.defaults.db <> ")") ]
+    [ long "db", metavar "NAME", help ("Database filename (default: " <> p.defaults.db <> ")") ]
   cpus <- optional $ option int $ fold [ long "cpus", metavar "N", help "BSD guest vCPUs (default 2); size the shared Linux VM with `bsdkrun docker start --cpus N`" ]
   mem <- optional $ option int $ fold [ long "mem", metavar "MIB", help "BSD guest RAM in MiB (default 1024); size the shared Linux VM with `bsdkrun docker start --mem MIB`" ]
   branch <- optional $ strOption $ fold
@@ -112,6 +113,9 @@ destroyP = ado
   yes <- switch $ fold [ long "yes", short 'y', help "Do not ask for confirmation" ]
   in Destroy { yes }
 
+clientP :: Parser Command
+clientP = Client <<< Array.fromFoldable <$> many (strArgument (metavar "DUCKDB_ARGS..."))
+
 commands :: Profile -> Parser Command
 commands p = base
   where
@@ -135,16 +139,17 @@ commands p = base
             , footer ("Like git: `" <> p.tool <> " branch` (or `branch ls`) lists, `" <> p.tool <> " branch NAME` forks the current branch, `" <> p.tool <> " branch -d NAME` (or `branch rm NAME`) deletes, `" <> p.tool <> " checkout NAME` switches.")
             ]
         , command "checkout" $ info (helper <*> checkoutP) $ progDesc "Switch the data directory to BRANCH, -b to create it first (alias: switch)"
-        , command p.clientName $ info (pure Client) $ progDesc ("Open " <> p.clientName <> " on the sandbox database")
-        , command p.fancy.name $ info (pure Fancy) $ progDesc ("Open " <> p.fancy.name <> " on the sandbox database")
-        , command "url" $ info (pure Url) $ progDesc "Print the database file location in the guest"
+        , command p.clientName $ info (helper <*> clientP) $ fold [ progDesc ("Open " <> p.clientName <> " on the sandbox database; forwards CLI arguments"), forwardOptions ]
+        , command p.fancy.name $ info (helper <*> clientP) $ fold [ progDesc ("Alias of " <> p.clientName), forwardOptions ]
+        , command "token" $ info (pure Token) $ progDesc "Print the Linux Quack authentication token (password)"
+        , command "url" $ info (pure Url) $ progDesc "Print the Linux Quack connection URI (BSD: database file)"
         , command "doctor" $ info (pure Doctor) $ progDesc "Check bsdkrun, the hypervisor, Node and Docker"
         , command "destroy" $ info (helper <*> destroyP) $ progDesc "Remove the sandbox and the data volume with every branch (asks first)"
         ]
     )
     <|> subparser
       ( fold
-          ( map (\alias -> command alias $ info (pure Client) $ progDesc ("Alias of " <> p.clientName)) p.clientAliases <>
+          ( map (\alias -> command alias $ info (helper <*> clientP) $ fold [ progDesc ("Alias of " <> p.clientName), forwardOptions ]) p.clientAliases <>
           [ command "shell" $ info (pure Shell) $ progDesc "Alias of ssh"
           , command "logs" $ info (helper <*> logsP) $ progDesc "Alias of log"
           , command "switch" $ info (helper <*> checkoutP) $ progDesc "Alias of checkout"

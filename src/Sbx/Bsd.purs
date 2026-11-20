@@ -27,7 +27,7 @@ import Effect.Console (log)
 import Effect.Exception (error)
 import Foreign.Object as Object
 import Sbx.Cli (BranchOpts, Command(..), StartOpts)
-import Sbx.DuckDB (versionCommand, versionMajor)
+import Sbx.DuckDB (databaseFile, versionCommand, versionMajor)
 import Sbx.Native as Native
 import Sbx.Profile (ClientCmd(..), Creds, Os(..), Profile, osName, parseOs)
 import Sbx.State (State)
@@ -52,9 +52,10 @@ run p os = case _ of
     else (B.logs o.boot box >>= say) $> 0
   Branch o -> branch p o
   Checkout o -> checkout p o
-  Url -> requireState p >>= \st -> say (p.url st.version (creds st) st.port) $> 0
-  Client -> client p os
-  Fancy -> client p os
+  Url -> requireState p >>= \st -> say ("file " <> databaseFile st.db <> " in the BSD guest (no server)") $> 0
+  Client args -> client p os args
+  Token -> fail "token is Linux only; BSD guests use embedded file access"
+  Fancy -> client p os []
   Doctor -> doctor p
   Destroy o -> destroy p o.yes
 
@@ -217,6 +218,7 @@ createOptions p os st =
 
 start :: Profile -> Os -> StartOpts -> Aff Int
 start p os o = do
+  when (isJust o.port || isJust o.password) $ fail "--port and --password are Linux only; BSD guests use embedded file access"
   previous <- liftEffect (State.load p.tool)
   for_ previous \s -> for_ o.version \v -> when (v /= s.version) $ fail "OS release is fixed; destroy the sandbox to change it"
   let
@@ -271,15 +273,15 @@ status p = do
   m <- findMachine p
   say (p.tool <> " " <> st.os <> " " <> st.version <> " " <> if maybe false _.running m then "RUNNING" else "STOPPED")
   say ("  branch " <> st.branch)
-  say ("  " <> p.url st.version (creds st) st.port)
+  say ("  " <> "file " <> databaseFile st.db <> " in the BSD guest (no server)")
   pure 0
 
-client :: Profile -> Os -> Aff Int
-client p os = do
+client :: Profile -> Os -> Array String -> Aff Int
+client p os extra = do
   st <- requireState p
   box <- requireRunning p
   case p.client of
-    Guest args -> Sandbox.execInteractive (args os st.version (creds st)) box
+    Guest args -> Sandbox.execInteractive (args os st.version (creds st) <> extra) box
     Host _ -> fail "expected a guest DuckDB CLI"
 
 branch :: Profile -> BranchOpts -> Aff Int

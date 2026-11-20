@@ -12,7 +12,7 @@ import Sbx.Native as Native
 
 type State =
   { os :: String
-  , version :: String -- ^ DuckDB image tag or reference
+  , version :: String -- ^ Linux image tag/reference, or BSD OS release
   , port :: Int
   , user :: String
   , password :: String

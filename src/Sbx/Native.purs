@@ -47,6 +47,8 @@ download u dest = toAff (downloadImpl u dest)
 foreign import downloadImpl :: String -> String -> Async Unit
 
 foreign import isTty :: Effect Boolean
+foreign import randomPassword :: Effect String
+foreign import loopbackListener :: Int -> Effect Boolean
 foreign import nodeVersion :: Effect String
 foreign import nodePath :: Effect String
 -- | `$XDG_CONFIG_HOME/<tool>` or `~/.config/<tool>`, created if missing.

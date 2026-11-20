@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { createInterface } from "node:readline";
 import { spawn, execFile } from "node:child_process";
@@ -22,6 +23,27 @@ export const spawnInheritImpl = cmd => args => env => cwd => async(signal => new
 }));
 
 export const isTty = () => Boolean(process.stdin.isTTY && process.stdout.isTTY);
+export const randomPassword = () => randomBytes(32).toString("hex");
+// Inspect the actual host listener, including engines started outside sbx.
+// A Linux /proc entry is little endian per 32-bit word; macOS provides lsof.
+export const loopbackListener = port => () => {
+  if (process.platform === "linux") {
+    const listeners = [];
+    for (const path of ["/proc/net/tcp", "/proc/net/tcp6"]) {
+      if (!existsSync(path)) continue;
+      for (const line of readFileSync(path, "utf8").trim().split("\n").slice(1)) {
+        const fields = line.trim().split(/\s+/);
+        const [address, hexPort] = fields[1].split(":");
+        if (fields[3] === "0A" && parseInt(hexPort, 16) === port) listeners.push(address);
+      }
+    }
+    return listeners.length > 0 && listeners.every(a =>
+      (a.length === 8 && a.endsWith("7F")) || a === "00000000000000000000000001000000");
+  }
+  const output = execFileSync("lsof", ["-nP", "-a", `-iTCP:${port}`, "-sTCP:LISTEN", "-Fn"], { encoding: "utf8" });
+  const addresses = output.split("\n").filter(l => l.startsWith("n")).map(l => l.slice(1));
+  return addresses.length > 0 && addresses.every(a => /^127\.\d+\.\d+\.\d+:\d+$/.test(a) || a === `[::1]:${port}`);
+};
 export const nodeVersion = () => process.version;
 export const nodePath = () => process.execPath;
 export const configDir = tool => () => {
@@ -36,7 +58,7 @@ export const pathJoin = a => b => join(a, b);
 export const readJson = path => () => {
   try { return JSON.parse(readFileSync(path, "utf8")); } catch { return null; }
 };
-export const writeJson = path => value => () => writeFileSync(path, JSON.stringify(value, null, 2) + "\n");
+export const writeJson = path => value => () => { writeFileSync(path, JSON.stringify(value, null, 2) + "\n", { mode: 0o600 }); chmodSync(path, 0o600); };
 export const writeText = path => text => () => writeFileSync(path, text);
 export const removeFile = path => () => rmSync(path, { force: true });
 export const fileExists = path => () => existsSync(path);
