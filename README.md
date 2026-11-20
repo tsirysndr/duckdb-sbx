@@ -149,6 +149,52 @@ npm run build:bin                     # dist/duckdb-sbx
 
 The binary still needs bsdkrun and, for Linux guests, the Docker CLI on the host.
 
+## Parallel branches
+
+`duckdb-sbx branch NAME` clones the data with ZFS copy-on-write and starts a
+parallel instance. The original keeps running and remains selected. Forks
+inherit the source's OS, version, database and credentials; later writes stay
+inside their own dataset. You can fork a fork with `--from`.
+
+```sh
+duckdb-sbx branch feature
+duckdb-sbx branch experiment --from feature
+duckdb-sbx branch staging --port 19494
+duckdb-sbx --branch feature url
+duckdb-sbx --branch feature status
+duckdb-sbx --branch feature stop
+duckdb-sbx --branch feature start
+duckdb-sbx checkout feature       # select its server; the others keep running
+duckdb-sbx checkout main
+duckdb-sbx branch -d experiment   # stop its instance and delete its dataset
+```
+
+The allocator skips occupied host ports and ports reserved by stopped instances.
+BSD server forks also check guest listeners. `--port` selects an explicit port;
+collisions fail before a new dataset is created. A stopped fork retains its
+port, and a busy port on restart is reported rather than silently connecting
+to another service. Put the global `--branch NAME` option **before** the command
+to target an instance without changing your selection.
+
+Linux instances are separate containers in the shared Docker VM, each mounting
+only its own dataset. FreeBSD/NetBSD instances use separate PostgreSQL or MariaDB
+processes inside the existing BSD VM, with separate data directories, ports,
+PID files, sockets and logs. One VM owns the ZFS pool: the disk is never imported
+into multiple VMs at once. Platform support is unchanged: DuckDB on BSD remains
+embedded file access, and SQLite's available engines remain Linux-only.
+
+`checkout` selects an existing parallel instance; for branches without an
+instance it retains the original parent-server mount-switching behavior.
+`checkout -b NAME` retains that behavior too. `branch` lists datasets and parallel
+instances with their status and ports. `branch -d NAME` removes only that fork;
+`destroy` removes the parent sandbox and all its parallel instances. A failed
+fork startup retains its data and settings so `--branch NAME start` can retry.
+
+Snapshots of running databases are crash-consistent. The fork performs normal
+WAL/redo recovery on startup; it does not copy the source process's locks or run
+a second server over the same writable directory. This provides independent
+data, not a security boundary between processes sharing a BSD VM.
+
 ## Commands
 
 | Command | Purpose |
@@ -160,8 +206,8 @@ The binary still needs bsdkrun and, for Linux guests, the Docker CLI on the host
 | `exec CMD...` | Run a command in the guest; `-t` allocates a terminal |
 | `ssh` | Open a shell in the guest (alias: `shell`) |
 | `log [-f]` | Show guest logs (alias: `logs`); `--boot` shows VM boot logs |
-| `branch [NAME]` | List branches or fork the current one |
-| `branch NAME --from SOURCE` | Fork another branch without switching |
+| `branch [NAME]` | List branches or fork a parallel instance |
+| `branch NAME --from SOURCE` | Fork another branch into a parallel instance |
 | `branch -d NAME` | Delete a branch (`branch rm NAME` also works) |
 | `checkout [-b] NAME` | Switch branches; `-b` creates first (alias: `switch`) |
 | `url` | Print the Linux Quack URI, or the BSD file location |
@@ -209,7 +255,7 @@ if they contain a compatible CLI at `/duckdb`, like the official image.
 ## Branches and file access
 
 ```sh
-duckdb-sbx branch staging             # fork without switching
+duckdb-sbx branch staging             # start a fork without changing selection
 duckdb-sbx checkout staging
 duckdb-sbx checkout -b try-query
 duckdb-sbx checkout main
