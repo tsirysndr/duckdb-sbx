@@ -8,7 +8,6 @@ import Data.Argonaut.Parser (jsonParser)
 import Data.Array as A
 import Data.Either (Either(..), either)
 import Data.Maybe (Maybe(..), maybe)
-import Data.Int as Int
 import Data.String as S
 import Data.String.Regex (regex, test)
 import Data.String.Regex.Flags (noFlags)
@@ -84,22 +83,6 @@ prepareRuntime = do
       N.setEnv "BSDKRUN_BIN" binary
       N.setEnv "PATH" (directory <> ":" <> old)
     N.setEnv "BSDKRUN_NO_AUTO_INSTALL" "1"
-  host <- liftEffect N.platform
-  ci <- liftEffect (N.env "GITHUB_ACTIONS")
-  when (host.os == "linux" && ci == "true") do
-    -- Linux's virtio-fs backend pins an O_PATH fd for every looked-up inode.
-    -- Raising only the soft limit cannot exceed the runner's inherited hard
-    -- limit. Lift both before launching or restarting the VM, so it inherits
-    -- the kernel ceiling, not a small interactive-shell limit.
-    raw <- liftEffect (N.readText "/proc/sys/fs/nr_open")
-    limit <- cappedLimit raw
-    ownPid <- liftEffect N.pid
-    void $ run "sudo" [ "-n", "prlimit", "--pid", show ownPid, "--nofile=" <> show limit <> ":" <> show limit ]
-    void $ run "prlimit" [ "--pid", show ownPid, "--nofile" ]
-  where
-  cappedLimit raw = fromEither $ case Int.fromString (S.trim raw) of
-    Just value | value >= 65536 -> Right value
-    _ -> Left "Cannot determine a usable Linux open-file ceiling"
 
 bsdkrun :: Aff String
 bsdkrun = fallback "BSDKRUN_BIN" "bsdkrun"

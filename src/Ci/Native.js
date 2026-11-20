@@ -69,5 +69,3 @@ export const onInterrupt = action => () => {
 export const setArgs = args => () => { process.argv.splice(2, process.argv.length - 2, ...args); };
 
 export const stream = text => () => { process.stderr.write(text); };
-
-export const pid = () => process.pid;

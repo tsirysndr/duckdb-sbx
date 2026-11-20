@@ -1,11 +1,9 @@
-module Ci.Install (install, verifyDriver, freshEngine) where
+module Ci.Install (install, verifyDriver) where
 
 import Prelude
 import Ci.Common as C
 import Ci.Native as N
 import Data.Array as A
-import Data.Argonaut.Core as J
-import Data.Either (Either(..))
 import Data.Maybe (fromMaybe)
 import Data.String as S
 import Effect.Aff (Aff)
@@ -13,14 +11,6 @@ import Effect.Class (liftEffect)
 
 -- Overlay snapshots require a real backing filesystem, including after the
 -- engine restarts to attach a ZFS volume. Never silently fall back to VFS.
-freshEngine :: J.Json -> Either String Unit
-freshEngine status = do
-  running <- C.boolField "running" status
-  machine <- C.field "machine_id" status
-  disk <- C.field "disk" status
-  if not running && J.isNull machine && J.isNull disk then Right unit
-  else Left "CI installation requires a fresh engine and image store; existing data is never reformatted"
-
 verifyDriver :: String -> Aff Unit
 verifyDriver runtime = do
   status <- C.run runtime [ "docker", "status", "--json" ] >>= C.fromEither <<< C.jsonSuffix <<< _.stdout
@@ -32,12 +22,12 @@ verifyDriver runtime = do
 
 install :: String -> Aff Unit
 install version = do
-  C.demand "Expected a bsdkrun release such as v0.12.0" (C.matches "^v[0-9]+\\.[0-9]+\\.[0-9]+$" version)
+  C.demand "Expected a bsdkrun release such as v0.12.1" (C.matches "^v[0-9]+\\.[0-9]+\\.[0-9]+$" version)
   host <- liftEffect N.platform
   C.demand "The installer requires Ubuntu x86_64 with KVM" (host.os == "linux" && host.arch == "x64")
   liftEffect (N.exists "/dev/kvm") >>= C.demand "/dev/kvm is required; live tests are never skipped"
   void $ C.run "sudo" [ "-n", "apt-get", "update" ]
-  void $ C.run "sudo" [ "-n", "apt-get", "install", "-y", "--no-install-recommends", "ca-certificates", "curl", "tar", "gzip", "xz-utils", "util-linux", "e2fsprogs", "libgmp10", "libtinfo6" ]
+  void $ C.run "sudo" [ "-n", "apt-get", "install", "-y", "--no-install-recommends", "ca-certificates", "curl", "tar", "gzip", "xz-utils", "libgmp10", "libtinfo6" ]
   void $ C.run "sudo" [ "-n", "chmod", "a+rw", "/dev/kvm" ]
   liftEffect (N.readableWritable "/dev/kvm") >>= C.demand "KVM must be readable and writable"
   void $ C.run "docker" [ "--version" ]
@@ -60,22 +50,6 @@ install version = do
   runtime <- C.bsdkrun
   void $ C.run runtime [ "--version" ]
   void $ C.run runtime [ "probe" ]
-  before <- C.run runtime [ "docker", "status", "--json" ] >>= C.fromEither <<< C.jsonSuffix <<< _.stdout
-  C.fromEither (freshEngine before)
-  diskStatus <- C.run runtime [ "docker", "disk", "--size", "20G", "--json" ] >>= C.fromEither <<< C.jsonSuffix <<< _.stdout
-  disk <- C.fromEither (C.stringField "disk" diskStatus)
-  -- Format the regular file on the host, not through virtio-blk. The guest
-  -- formatter's zero/discard operations can truncate the backing image by
-  -- 64 KiB; the next boot then rejects ext4 with "bad geometry" and silently
-  -- leaves Docker on virtio-fs. A nonblank host-formatted image skips that
-  -- guest formatting path. freshEngine refuses any existing image store.
-  void $ C.run "mkfs.ext4" [ "-F", "-m", "0", "-E", "nodiscard", disk ]
-  void $ C.run runtime [ "docker", "start", "--cpus", "2", "--mem", "2048", "--publish-bind", "127.0.0.1", "--disk-size", "20G", "--json" ]
-  verifyDriver runtime
-  -- Exercise the same restart path needed to attach the sandbox's ZFS disk.
-  void $ C.run runtime [ "docker", "stop" ]
-  void $ C.run runtime [ "docker", "start", "--publish-bind", "127.0.0.1", "--json" ]
-  verifyDriver runtime
 
 download :: String -> String -> Aff Unit
 download url destination = void $ C.run "curl" [ "--fail", "--show-error", "--silent", "--location", "--retry", "3", url, "-o", destination ]

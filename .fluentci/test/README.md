@@ -11,18 +11,16 @@ fluentci run test e2e                        # installed bsdkrun, Docker and bui
 ```
 
 `all` invokes the project's compiled PureScript CI runner (`src/Ci`). It
-verifies the pinned bsdkrun release archive (default `v0.12.0`), installs its
-bundled Linux libkrun libraries and gvproxy, and enables `/dev/kvm`. It requests
-a sparse 20 GiB Docker data disk, formats its regular file on the host as ext4,
-and requires native overlay storage (`overlayfs` or `overlay2`). This bypasses
-in-guest formatting that can truncate the backing image by 64 KiB and break
-ext4's geometry at the next boot. Driver and actual ext4 mount checks run before
-and after a restart; VFS is rejected. Installation requires a fresh engine and
-image store so existing data is never formatted.
+verifies the pinned bsdkrun release archive (default `v0.12.1`), installs its
+bundled Linux libkrun libraries and gvproxy, and enables `/dev/kvm`. It leaves
+engine creation and disk formatting to normal `duckdb-sbx start` and bsdkrun.
+There is no host mkfs call, engine pre-start or custom file-limit adjustment.
 
-E2E diagnostics capture post-ZFS mounts, engine status and guest process limits.
-GitHub Linux processes raise both soft/hard open-file limits to the kernel
-ceiling before starting VMs, preventing virtio-fs inode handle exhaustion.
+The live suite checks that normal startup creates a native overlay engine on
+ext4, then restarts the VM and checks its mount and data persistence. New engines
+request a sparse 20 GiB image store; existing engines retain their configuration.
+bsdkrun 0.12.1 provides the guest ext4 formatting fix on both macOS and Linux.
+Diagnostics capture post-ZFS mounts, engine status and guest process limits.
 
 It runs PureScript assertions and `bun test` for mocked CLI/CI checks, builds
 the executable, then runs the opt-in Bun live suite. No Bash scripts are used.

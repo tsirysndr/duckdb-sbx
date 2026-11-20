@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { Left, Right } from '../output/Data.Either/index.js';
 import { decode, persist } from '../output/Ci.Environment/index.js';
 import { targets, verifyBinary, verifyVersion } from '../output/Ci.Release/index.js';
-import { install, verifyDriver, freshEngine } from '../output/Ci.Install/index.js';
+import { install, verifyDriver } from '../output/Ci.Install/index.js';
 import { redact } from '../output/Ci.E2E/index.js';
 import { command } from '../output/Ci.Native/index.js';
 import { promise } from './support/aff.mjs';
@@ -103,13 +103,4 @@ test('process timeout settles even when a detached descendant holds output pipes
   const source = 'const {spawn}=require("node:child_process"); spawn(process.execPath,["-e","setTimeout(()=>{},1500)"],{detached:true,stdio:"inherit"}).unref();';
   await expect(promise(command({program:process.execPath,args:['-e',source],env:{},cwd:'',timeout:250,output:()=>()=>{}}))).rejects.toThrow('timed out');
   expect(Date.now()-started).toBeLessThan(1200);
-});
-
-
-test('host formatting refuses an existing engine or disk before any mutation', () => {
-  expect(freshEngine({running:false,machine_id:null,disk:null})).toBeInstanceOf(Right);
-  expect(freshEngine({running:false,machine_id:'existing',disk:null})).toBeInstanceOf(Left);
-  expect(freshEngine({running:false,machine_id:null,disk:'/existing.img'})).toBeInstanceOf(Left);
-  expect(freshEngine({running:true,machine_id:'active',disk:'/existing.img'})).toBeInstanceOf(Left);
-  expect(freshEngine({})).toBeInstanceOf(Left);
 });

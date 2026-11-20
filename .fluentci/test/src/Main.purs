@@ -10,13 +10,13 @@ import FluentCI.Plugin as P
 run :: P.Pipeline -> Effect String
 run plan = P.stdout plan >>= either (throw <<< P.errorMessage) pure
 
--- | Install bsdkrun with verified archives and an ext4-backed overlay Docker engine, then run PureScript/Bun unit and live Quack/ZFS tests.
+-- | Install bsdkrun with verified archives and test normal sandbox startup, then run PureScript/Bun unit and live Quack/ZFS tests.
 -- | @param directory Project checkout directory; defaults to the current directory.
--- | @param bsdkrunVersion Official bsdkrun release to install; defaults to v0.12.0.
+-- | @param bsdkrunVersion Official bsdkrun release to install; defaults to v0.12.1.
 all :: { directory :: Maybe String, bsdkrunVersion :: Maybe String } -> Effect String
 all args = run $ P.pipeline "duckdb-sbx-test"
   # P.withWorkdir (fromMaybe "." args.directory)
-  # P.exec [ "node", "bin/ci.js", "install", fromMaybe "v0.12.0" args.bsdkrunVersion ]
+  # P.exec [ "node", "bin/ci.js", "install", fromMaybe "v0.12.1" args.bsdkrunVersion ]
   # P.exec [ "npm", "test" ]
   # P.exec [ "npm", "run", "build:bin" ]
   # P.exec [ "npm", "run", "test:e2e" ]

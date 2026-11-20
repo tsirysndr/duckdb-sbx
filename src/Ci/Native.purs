@@ -43,5 +43,3 @@ foreign import setArgs :: Array String -> Effect Unit
 
 -- | CI progress goes to stderr so FluentCI stdout capture cannot hide it.
 foreign import stream :: String -> Effect Unit
-
-foreign import pid :: Effect Int

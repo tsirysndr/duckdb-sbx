@@ -91,7 +91,7 @@ is recreated over the existing data branch.
 ## Requirements and installation
 
 - macOS on Apple Silicon, or Linux with KVM.
-- [bsdkrun](https://github.com/tsirysndr/bsdkrun#install) 0.12 or newer
+- [bsdkrun](https://github.com/tsirysndr/bsdkrun#install) 0.12.1 or newer
   (`brew install tsirysndr/tap/bsdkrun` on macOS).
 - Node.js 22 or newer.
 - For Linux guests, the Docker CLI (`brew install docker` on macOS).
@@ -260,20 +260,18 @@ environment output is validated before exporting it to later GitHub steps.
 
 The custom native Wasm test component lives in `.fluentci/test`. It invokes
 PureScript CI commands in `src/Ci`: downloads and verifies official bsdkrun
-v0.12.0 archives (including Linux libkrun libraries), installs gvproxy, enables
-`/dev/kvm`, and prepares the shared Docker engine. CI creates a sparse 20 GiB
-image-store disk and formats the regular file as ext4 on the host before its
-first boot. This bypasses a guest-formatting path that can truncate the backing
-file by 64 KiB and leave ext4 with invalid geometry after restart. It checks
-native overlay storage (`overlayfs`/`overlay2`) and the actual ext4 mount both
-before and after an engine restart. VFS and virtio-fs image stores fail these
-checks. Formatting requires a fresh engine and image store; existing disks
-are never reformatted.
+v0.12.1 archives (including Linux libkrun libraries), installs gvproxy and enables
+`/dev/kvm`. It does not create or format a Docker image store or pre-start an
+engine. The live suite exercises normal `duckdb-sbx start` from a fresh engine,
+checks native overlay storage on ext4, restarts the VM and verifies persistence.
+Missing KVM fails rather than skipping. Diagnostics record actual mounts,
+engine status and guest process limits.
 
-Missing KVM fails rather than skipping. On GitHub Linux runners the CI code
-raises both open-file limits to `/proc/sys/fs/nr_open` before launching VMs:
-the Linux virtio-fs backend retains a host descriptor per looked-up inode.
-E2E diagnostics record actual mounts, engine status and guest process limits.
+Normal startup requests a sparse 20 GiB image-store disk when creating a new
+shared engine. bsdkrun 0.12.1 handles guest formatting and mounting; its ext4
+zeroout fix removes the need for the old CI host-formatting workaround. Existing
+engines keep their configuration and data. CI also uses bsdkrun's own host file
+limit handling instead of changing process limits itself.
 
 `npm test` runs PureScript assertions and **Bun tests** for mocked CLI lifecycles,
 CI environment validation, release guards and executable headers. Live tests are

@@ -2,6 +2,7 @@ module Ci.E2E (run, sandboxCli, redact) where
 
 import Prelude
 import Ci.Common as C
+import Ci.Install as Install
 import Ci.Native as N
 import Control.Monad.Error.Class (throwError)
 import Data.Argonaut.Core as J
@@ -141,6 +142,15 @@ body c = do
   pass c "host Quack client authenticated; incorrect password rejected"
   void $ query c client initial "CREATE TABLE e2e_values AS SELECT 42 AS n;" false
   cli c [ "duckdb", "-noheader", "-csv", "-c", "SELECT n FROM e2e_values;" ] >>= assertEqual "42"
+  unless wasRunning do
+    -- The normal CLI created this engine. Check its own formatting, then
+    -- exercise a complete VM restart without an installer-prepared store.
+    Install.verifyDriver c.runtime
+    void $ runtime c [ "docker", "stop" ]
+    void $ cli c [ "start", "-d" ]
+    Install.verifyDriver c.runtime
+    query c client initial "SELECT n FROM e2e_values;" false >>= assertEqual "42"
+    pass c "normal startup creates an overlay/ext4 engine and preserves it across VM restart"
   void $ cli c [ "checkout", "-b", "feature" ]
   void $ query c client initial "UPDATE e2e_values SET n=7;" false
   query c client initial "SELECT n FROM e2e_values;" false >>= assertEqual "7"
