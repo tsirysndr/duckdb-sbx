@@ -159,7 +159,11 @@ waitMounted p os box = go (os == NetBSD)
   modulesInstalledButNotLoaded = do
     m <- B.status box
     prepared <- maybe (pure false) (\i -> liftEffect (Native.fileExists (Native.pathJoin i.stateDir "zfs-netbsd-ready"))) m
-    if not prepared then pure false else not <$> probe [ "sh", "-c", "modstat | grep -q '^zfs '" ] box
+    -- The initial --zfs boot hook stages modules inside the guest without
+    -- writing the marker used by a later `zfs attach`. Check both paths.
+    staged <- if prepared then pure true else probe
+      [ "sh", "-c", "test -f /stand/$(uname -m)/$(uname -r)/modules/zfs/zfs.kmod && grep -qx zfs /etc/modules.conf" ] box
+    if not staged then pure false else not <$> probe [ "sh", "-c", "modstat | grep -q '^zfs '" ] box
   go mayRestart = do
     outcome <- attempt $ waitFor ("the data branch at " <> dir) 90 do
       up <- mounted

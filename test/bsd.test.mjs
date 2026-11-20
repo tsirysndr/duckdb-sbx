@@ -22,7 +22,7 @@ switch(a[0]) {
   s.machine={id:'0123456789ab',name:'duckdb-sbx',image:a[0],kind:a[0],running:true,exit_code:0,cpus:Number(flag('--cpus')),mem:Number(flag('--mem')),state_dir:dir,ports:[],created_at:0};
   s.mounted=flag('--zfs').split('@')[1].split(':')[0];
   if(process.env.SBX_GROW_REBOOT) s.machine.running=false;
-  if(process.env.SBX_ZFS_REBOOT) { s.mountReady=false; writeFileSync(join(dir,'zfs-netbsd-ready'),''); }
+  if(process.env.SBX_ZFS_REBOOT) { s.mountReady=false; if(!process.env.SBX_NO_HOST_MARKER) writeFileSync(join(dir,'zfs-netbsd-ready'),''); }
   console.log(s.machine.id); break;
  case 'start': s.machine.running=true; s.mountReady=true; break;
  case 'stop': s.machine.running=false; break;
@@ -118,5 +118,13 @@ test('NetBSD restarts to load installed ZFS modules',()=>sandbox(({run,calls})=>
   const r=run(['start','netbsd','-d'],0,{SBX_ZFS_REBOOT:'1'});
   assert.match(r.stdout,/restarting the VM to import the data branch/);
   assert(calls().some(a=>a[0]==='stop'));
+  run(['destroy','--yes']);
+}));
+
+
+test('NetBSD detects staged ZFS modules without a host marker',()=>sandbox(({run,calls})=>{
+  const r=run(['start','netbsd','-d'],0,{SBX_ZFS_REBOOT:'1',SBX_NO_HOST_MARKER:'1'});
+  assert.match(r.stdout,/restarting the VM to import the data branch/);
+  assert(calls().some(a=>a[0]==='exec'&&a.join(' ').includes('modules/zfs/zfs.kmod')));
   run(['destroy','--yes']);
 }));
