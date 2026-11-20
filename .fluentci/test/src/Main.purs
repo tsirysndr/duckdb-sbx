@@ -10,7 +10,7 @@ import FluentCI.Plugin as P
 run :: P.Pipeline -> Effect String
 run plan = P.stdout plan >>= either (throw <<< P.errorMessage) pure
 
--- | Install bsdkrun with verified archives and a VFS Docker engine, then run PureScript/Bun unit and live Quack/ZFS tests.
+-- | Install bsdkrun with verified archives and an ext4-backed overlay Docker engine, then run PureScript/Bun unit and live Quack/ZFS tests.
 -- | @param directory Project checkout directory; defaults to the current directory.
 -- | @param bsdkrunVersion Official bsdkrun release to install; defaults to v0.12.0.
 all :: { directory :: Maybe String, bsdkrunVersion :: Maybe String } -> Effect String
