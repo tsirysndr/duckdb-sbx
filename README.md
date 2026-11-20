@@ -2,8 +2,6 @@
 
 DuckDB in a [bsdkrun](https://github.com/tsirysndr/bsdkrun) microVM, with a
 ZFS database branch you can fork copy-on-write, switch between, and delete.
-Written in PureScript, following [postgres-sbx](../postgres-sbx),
-[mariadb-sbx](../mariadb-sbx), and [sqlite-sbx](../sqlite-sbx).
 
 ```sh
 duckdb-sbx start                       # Linux, DuckDB 2.0.0 Quack server on 127.0.0.1:9494
